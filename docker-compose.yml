@@ -1,0 +1,153 @@
+version: "3.8"
+
+services:
+  web:
+    # for prod, change to apps/web/Dockerfile
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - NEXT_PUBLIC_MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - NEXT_PUBLIC_MINIO_PORT=${MINIO_PORT}
+      - NEXT_PUBLIC_MINIO_USE_SSL=${MINIO_USE_SSL}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app/:delegated
+      - /app/node_modules
+      - /app/storage
+    depends_on:
+      - minio
+      - minio-init
+    restart: unless-stopped
+      # - postgres
+      # - qdrant
+      # - neo4j
+      # - caldav
+      # - embed-service
+      # - summarization-service
+      # - scheduler-service
+  minio:
+        image: minio/minio
+        ports:
+            - 9000:9000
+            - 9001:9001
+        volumes:
+            - ./storage/minio:/mnt/data
+        environment:
+            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+            - MINIO_VOLUMES="/mnt/data"
+            - MINIO_OPTS="--console-address :9001"
+        restart: unless-stopped
+        command: server --console-address ":9001"
+  #creates buckets in minio so they are available when the app starts
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      sh -c "
+        # wait until MinIO API is responsive
+        until mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+        do echo 'Waiting for MinIO…' && sleep 2;
+        done;
+        # create your buckets if they don't already exist
+        mc mb local/documents   || true;
+        mc mb local/avatars     || true;
+        mc mb local/notes-media || true;
+        mc mb local/thumbnails  || true;
+        mc mb local/temp        || true;
+
+        echo 'Default buckets ensured';
+      "
+    # ensure it only runs once
+    restart: "on-failure"
+  # postgres:
+  #   image: postgres:14
+  #   restart: always
+  #   environment:
+  #     POSTGRES_USER: nextai
+  #     POSTGRES_PASSWORD: changeme
+  #     POSTGRES_DB: nextai
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   restart: always
+  #   ports:
+  #     - "6333:6333"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+
+  # neo4j:
+  #   image: neo4j:4.4
+  #   restart: always
+  #   environment:
+  #     NEO4J_AUTH: "neo4j/secret"
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   volumes:
+  #     - neo4j_data:/data
+
+  # caldav:
+  #   image: tomassedovic/radicale:latest
+  #   restart: always
+  #   ports:
+  #     - "5232:5232"
+  #   volumes:
+  #     - caldav_data:/var/lib/radicale
+
+  # embed-service:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/embed/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     DATABASE_URL: postgres://nextai:changeme@postgres:5432/nextai
+  #     QDRANT_URL: http://qdrant:6333
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
+  #   depends_on:
+  #     - postgres
+  #     - qdrant
+  #   ports:
+  #     - "5001:5001"
+
+  # summarization-service:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/summarize/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     DATABASE_URL: postgres://nextai:changeme@postgres:5432/nextai
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
+  #   depends_on:
+  #     - postgres
+  #   ports:
+  #     - "5002:5002"
+
+  # scheduler-service:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/scheduler/Dockerfile
+  #   restart: on-failure
+  #   environment:
+  #     CALDAV_URL: http://caldav:5232
+  #     CALDAV_USER: user
+  #     CALDAV_PASSWORD: pass
+  #   depends_on:
+  #     - caldav
+  #   ports:
+  #     - "5003:5003"
+
+# volumes:
+  # postgres_data:
+  # qdrant_data:
+  # neo4j_data:
+  # caldav_data:

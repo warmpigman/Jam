@@ -1,0 +1,223 @@
+
+## 1. High-Level Architecture
+
+flowchart TB
+  subgraph Client (Next.js App)
+    A[Pages / App Router] --> B[Server Components]
+    A --> C[Client Components]
+    C -->|calls| D[API Routes]
+  end
+
+  subgraph AI & Data Services
+    D --> E[Embedding Service (Node/Python)]
+    D --> F[Summarization Service (Node/Python)]
+    D --> G[Scheduler Service (Atomic/Rust)]
+    E --> H[Vector DB (Qdrant)]
+    F --> I[LLM (OpenAI / Local LLaMA)]
+    G --> J[Calendar DB / CalDAV]
+  end
+
+  subgraph Core Storage & Sync
+    K[Document Store (S3/Postgres)] 
+    L[Notes DB (Postgres)]
+    M[Calendar Store (CalDAV)]
+    N[Mail Store (IMAP)]
+  end
+
+  E & F & G -->|read/write| K & L & M & N
+```
+
+* **Next.js App**
+
+  * **App Router** with nested layouts and React Server Components for heavy AI pages (e.g. universal search).
+  * **Client Components** for interactive editors (notes, mail UI, calendar UI).
+  * **API Routes** (in `app/api/…`) as lightweight endpoints to orchestrate microservices.
+
+* **AI & Data Services**
+
+  * **Embedding Service**: takes text/file, returns vector embeddings → stored in **Qdrant** for semantic search.
+  * **Summarization Service**: wraps OpenAI / local LLM to summarize, extract entities.
+  * **Scheduler Service**: adopts an open-source Motion-style engine (e.g. Atomic) to propose and auto-slot meetings.
+  * All can be deployed as Docker containers and addressed via HTTP from Next.js API routes.
+
+* **Core Storage & Sync**
+
+  * **Documents**: S3-compatible object store (or local FS) + Postgres for metadata.
+  * **Notes**: Postgres with full-text indexing.
+  * **Calendar**: CalDAV server (Radicale or built-in) for event storage and sync.
+  * **Mail**: IMAP store (Dovecot) for ingestion and sync.
+
+---
+
+## 2. Phased Roadmap
+
+### Phase 0: Monorepo & Bootstrap
+
+* **Monorepo Setup**: Turborepo or Nx to host Next.js (`apps/web`) + microservices (`packages/embed`, `packages/summarize`, `packages/scheduler`).
+* **CI/CD**: GitHub Actions pipeline to lint, type-check, build, and Docker-publish images.
+* **Env & Secrets**: Use dotenv + Vercel/Netlify secrets for API keys.
+
+### Phase 1: Core MVP
+
+1. **Document & Note CRUD**
+
+   * Next.js pages for upload, preview (PDF, Office).
+   * WYSIWYG note editor (TipTap or ProseMirror).
+   * Postgres schemas + user auth via NextAuth.js (Email/Password, OAuth).
+2. **Calendar UI**
+
+   * FullCalendar React component in a Client Component.
+   * API routes to create/read/update events in CalDAV.
+3. **Basic Mail Integration**
+
+   * Next.js Mail page using IMAP over TLS (via `imapflow` library).
+   * Send mail with SMTP (`nodemailer`).
+4. **Universal Search (Text Only)**
+
+   * Index documents & notes text in Postgres FTS.
+   * Simple Next.js API route returning matching IDs.
+5. **Deploy Homelab**
+
+   * Docker Compose with Next.js, Postgres, CalDAV server, Dovecot.
+
+### Phase 2: AI Enhancements
+
+1. **Semantic Vector Search**
+
+   * On document/note save: call embedded microservice → generate embeddings → push to Qdrant.
+   * Next.js “Search” page: query embeddings via API route, display ranked results.
+2. **Auto-Summaries & Entity Extraction**
+
+   * “Summarize” button on documents/notes: calls summarization service → stores summary + entities in Postgres.
+   * Sidebar UI showing key phrases, dates, contacts.
+3. **Back-linking & Knowledge Graph**
+
+   * Sync entities as nodes in Neo4j.
+   * Graph view page (using Cytoscape.js) showing relationships.
+4. **AI-Assisted Editor**
+
+   * In-note commands (“/rephrase,” “/expand”): call summarization service via API route.
+
+### Phase 3: AI Calendar & Email Sync
+
+1. **Motion-Style Scheduler**
+
+   * Integrate Atomic container, connect to user’s CalDAV via CalDAV client library.
+   * “Auto-Schedule Meeting” in Calendar UI: propose slots, confirm creation.
+2. **Email-Driven Events & Notes**
+
+   * In Mail UI: “Create Event from Email” button → parse date/time via summarization service → prefill event form.
+   * “Save Email as Note” → extract body + attachments into a new note with summary.
+3. **Notifications & Reminders**
+
+   * Next.js API cron (via GitHub Action scheduler or external cron) to scan upcoming deadlines → send email/push.
+
+### Phase 4: Polishing & SaaS Scaling
+
+1. **Multi-Tenant Architecture**
+
+   * Kubernetes: one namespace per tenant, isolated Postgres schemas + Qdrant collections.
+   * Ingress with tenant subdomain routing (e.g. `org1.app.com`).
+2. **Billing & Onboarding**
+
+   * Stripe integration in Next.js with Checkout and webhooks → enable/disable tenant namespace.
+   * Admin dashboard for usage metrics (API calls, storage).
+3. **High-Availability & Monitoring**
+
+   * Horizontal Pod Autoscalers, Postgres replicas, Qdrant clustering.
+   * Prometheus + Grafana + Alertmanager.
+4. **Security & Compliance**
+
+   * End-to-end encryption options for documents.
+   * Audit logging of all AI calls and data access.
+
+---
+
+## 3. Detailed Tech Stack
+
+| Layer                   | Technology & Notes                                             |
+| ----------------------- | -------------------------------------------------------------- |
+| **Frontend**            | Next.js 14 (App Router + React 18, Server & Client Components) |
+| **Auth/Session**        | NextAuth.js (JWT sessions, OAuth, Email Magic Links)           |
+| **API**                 | Next.js API Routes (`/app/api/.../route.ts`)                   |
+| **Document Storage**    | MinIO or AWS S3 (Node SDK) + Postgres metadata                 |
+| **Notes & Entities DB** | Postgres (Prisma ORM) with FTS columns                         |
+| **CalDAV Server**       | Radicale or CalDAV API library (e.g. `dav-client`)             |
+| **IMAP/SMTP**           | Dovecot + Postfix or `imapflow` + `nodemailer`                 |
+| **Vector Search**       | Qdrant (self-hosted Docker) + `qdrant-client` Node SDK         |
+| **LLM & AI Services**   | Python or Node microservices:                                  |
+
+* Embeddings: OpenAI Embeddings API or `@xenova/transformers`
+* Summarization: OpenAI Chat API or local LLaMA via Hugging Face
+* Scheduler: Atomic (Rust) wrapped in HTTP                          |
+  \| **Graph DB**             | Neo4j Aura or self-hosted (Docker)                                      |
+  \| **Containerization**     | Docker Compose (homelab) → Kubernetes + Helm (production)               |
+  \| **CI/CD**                | GitHub Actions (build, test, Docker push, k8s deploy)                   |
+  \| **Monitoring**           | Prometheus + Grafana + Loki                                              |
+  \| **Billing**              | Stripe + Next.js Webhooks + Dashboard                                   |
+
+---
+
+## 4. Step-by-Step Implementation
+
+1. **Monorepo Init**
+
+   ```bash
+   npx create-turbo@latest nextai-suite
+   cd nextai-suite
+   yarn install
+   ```
+
+2. **Next.js App Setup**
+
+   * Scaffold `apps/web` with `npx create-next-app@latest web --experimental-app`.
+   * Configure `next.config.js` for API routes and environment variables.
+
+3. **Basic Storage & Auth**
+
+   * Add NextAuth.js in `app/api/auth/[...nextauth]/route.ts`.
+   * Connect to Postgres via Prisma; define models for User, Document, Note, Event.
+
+4. **Document & Note UIs**
+
+   * Build upload form (Server Component) → API route to store file in MinIO + metadata in Postgres.
+   * Note editor as Client Component with TipTap; save via API route.
+
+5. **Calendar Integration**
+
+   * Embed FullCalendar in a Client Component (`app/calendar/page.tsx`).
+   * API routes to speak CalDAV library.
+
+6. **Mail Client**
+
+   * Create Mail page (`app/mail/page.tsx`); fetch folder list + messages from API route using IMAP client.
+
+7. **AI Microservices**
+
+   * In `packages/embed` & `packages/summarize`, build Dockerized Express/FastAPI services.
+   * Expose `/embed` and `/summarize` endpoints.
+   * Add Qdrant container; wire up embedding service.
+
+8. **Semantic Search UI**
+
+   * “Global Search” bar in layout → call Next.js API route `/api/search` → query Qdrant + Postgres for metadata.
+
+9. **Summaries & Entity Sidebar**
+
+   * On document/detail page, “Generate Summary” button → calls `/api/summarize` → save to Postgres → render sidebar.
+
+10. **Scheduler & Email-Events**
+
+    * Deploy Atomic scheduler container; API route `/api/schedule` to propose slots.
+    * In Mail UI, “Create Event” triggers `/api/from-email`.
+
+11. **Graph & Timeline Views**
+
+    * Add `/graph` page: fetch nodes/edges from Neo4j via API route; render with Cytoscape.js.
+    * Add `/timeline` page: fetch events; render with vis-timeline.
+
+12. **Polishing & Deploy**
+
+    * Configure Docker Compose for homelab.
+    * Write Helm charts for each service.
+    * Add CI jobs: tests, builds, Docker pushes, `helm upgrade --install`.
