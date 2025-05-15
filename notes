@@ -1,3 +1,6 @@
+when installing a new package in an app:
+
+
 
 ## 1. High-Level Architecture
 
@@ -16,7 +19,7 @@ flowchart TB
     F --> I[LLM (OpenAI / Local LLaMA)]
     G --> J[Calendar DB / CalDAV]
   end
-
+  
   subgraph Core Storage & Sync
     K[Document Store (S3/Postgres)] 
     L[Notes DB (Postgres)]

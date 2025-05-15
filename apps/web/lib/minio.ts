@@ -1,68 +1,63 @@
-// apps/web/lib/minio.ts
-import { Client as MinioClient, BucketItem } from 'minio'
+import { Client } from 'minio';
 
-const {
-  NEXT_PUBLIC_MINIO_ENDPOINT,
-  NEXT_PUBLIC_MINIO_PORT,
-  NEXT_PUBLIC_MINIO_USE_SSL,
-  MINIO_ROOT_USER,
-  MINIO_ROOT_PASSWORD,
-} = process.env
+// Determine if we're running on the server or client side
+const isServer = typeof window === 'undefined';
 
-if (
-  !NEXT_PUBLIC_MINIO_ENDPOINT ||
-  !MINIO_ROOT_USER ||
-  !MINIO_ROOT_PASSWORD
-) {
-  throw new Error('Missing MinIO environment variables')
+// Use different environment variables based on where the code is running
+// Server-side uses INTERNAL_MINIO_* variables
+// Client-side uses PUBLIC_MINIO_* variables
+const endPoint = isServer
+  ? (process.env.INTERNAL_MINIO_ENDPOINT || 'minio').replace(/^https?:\/\//, '').replace(/\/$/, '')
+  : (process.env.NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT || 'localhost').replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+const port = isServer
+  ? parseInt(process.env.INTERNAL_MINIO_PORT || '9000')
+  : parseInt(process.env.NEXT_PUBLIC_PUBLIC_MINIO_PORT || '9000');
+
+const useSSL = isServer
+  ? process.env.INTERNAL_MINIO_USE_SSL === 'true'
+  : process.env.NEXT_PUBLIC_PUBLIC_MINIO_USE_SSL === 'true';
+
+// Initialize MinIO client with access and secret keys
+export const minioClient = new Client({
+  endPoint,
+  port,
+  useSSL,
+  accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
+  secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
+});
+
+/**
+ * List all objects in a MinIO bucket
+ */
+export async function listObjects(bucketName: string) {
+  return new Promise<any[]>((resolve, reject) => {
+    const objects: any[] = [];
+    const stream = minioClient.listObjects(bucketName, '', true);
+    
+    stream.on('data', (obj) => objects.push(obj));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(objects));
+  });
 }
 
-export const minioClient = new MinioClient({
-  endPoint: NEXT_PUBLIC_MINIO_ENDPOINT,
-  port: NEXT_PUBLIC_MINIO_PORT ? parseInt(NEXT_PUBLIC_MINIO_PORT) : 9000,
-  useSSL: NEXT_PUBLIC_MINIO_USE_SSL === 'true',
-  accessKey: MINIO_ROOT_USER,
-  secretKey: MINIO_ROOT_PASSWORD,
-})
-
-// ensure a bucket exists (idempotent)
-export async function ensureBucket(bucketName: string) {
-  const exists = await minioClient.bucketExists(bucketName)
-  if (!exists) {
-    await minioClient.makeBucket(bucketName, '')
-  }
+/**
+ * Generate a presigned URL for an object in a MinIO bucket
+ */
+export async function getPresignedUrl(bucketName: string, objectName: string) {
+  return minioClient.presignedGetObject(bucketName, objectName, 24 * 60 * 60); // 24 hours expiry
 }
 
-// upload a buffer or stream
-export async function uploadObject(
-  bucketName: string,
-  objectName: string,
-  buffer: Buffer | NodeJS.ReadableStream,
-  meta?: Record<string, string>
-) {
-  await ensureBucket(bucketName)
-  return minioClient.putObject(bucketName, objectName, buffer, meta)
+/**
+ * Upload a file to a MinIO bucket
+ */
+export async function uploadObject(bucketName: string, objectName: string, fileBuffer: Buffer, metaData?: any) {
+  return minioClient.putObject(bucketName, objectName, fileBuffer, metaData);
 }
 
-// generate a presigned GET URL
-export function getPresignedUrl(
-  bucketName: string,
-  objectName: string,
-  expires = 24 * 60 * 60 // default 1 day
-): Promise<string> {
-  return minioClient.presignedGetObject(bucketName, objectName, expires)
-}
-
-// list objects in a bucket (optionally with prefix)
-export function listObjects(
-  bucketName: string,
-  prefix = ''
-): Promise<BucketItem[]> {
-  return new Promise((resolve, reject) => {
-    const items: BucketItem[] = []
-    const stream = minioClient.listObjectsV2(bucketName, prefix, true)
-    stream.on('data', (item) => items.push(item))
-    stream.on('error', reject)
-    stream.on('end', () => resolve(items))
-  })
+/**
+ * Delete an object from a MinIO bucket
+ */
+export async function deleteObject(bucketName: string, objectName: string) {
+  return minioClient.removeObject(bucketName, objectName);
 }
