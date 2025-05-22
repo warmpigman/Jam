@@ -1,5 +1,10 @@
 version: "3.8"
 
+# Create a custom network with DNS configuration
+networks:
+  jam_network:
+    driver: bridge
+
 services:
   web:
     # for prod, change to apps/web/Dockerfile
@@ -9,44 +14,77 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - NEXT_PUBLIC_MINIO_ENDPOINT=${PUBLIC_MINIO_ENDPOINT}
-      - NEXT_PUBLIC_MINIO_PORT=${PUBLIC_MINIO_PORT}
-      - NEXT_PUBLIC_MINIO_USE_SSL=${PUBLIC_MINIO_USE_SSL}
-      - INTERNAL_MINIO_ENDPOINT=${INTERNAL_MINIO_ENDPOINT}
+      - NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT=s3.jam.local
+      - NEXT_PUBLIC_PUBLIC_MINIO_PORT=80
+      - NEXT_PUBLIC_PUBLIC_MINIO_USE_SSL=false
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-      - INTERNAL_MINIO_PORT=${INTERNAL_MINIO_PORT}
+      - PUBLIC_DOMAIN=jam.local
+      - PUBLIC_S3_DOMAIN=s3.jam.local
     ports:
       - "3000:3000"
     volumes:
       - ./:/app/:delegated
       - /app/node_modules
       - /app/storage
+    # Add proper DNS resolution with extra_hosts
+    extra_hosts:
+      - "s3.jam.local:172.17.0.1"
+      - "jam.local:172.17.0.1"
     depends_on:
+      - nginx
       - minio
       - minio-init
     restart: unless-stopped
-      # - postgres
-      # - qdrant
-      # - neo4j
-      # - caldav
-      # - embed-service
-      # - summarization-service
-      # - scheduler-service
+    networks:
+      - jam_network
+    # - postgres
+    # - qdrant
+    # - neo4j
+    # - caldav
+    # - embed-service
+    # - summarization-service
+    # - scheduler-service
+  
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - minio
+    restart: unless-stopped
+    networks:
+      - jam_network
+    # Define proper hostnames for the nginx container
+    hostname: nginx
+    extra_hosts:
+      - "s3.jam.local:127.0.0.1"
+      - "jam.local:127.0.0.1"
+  
   minio:
-        image: minio/minio
-        ports:
-            - 9000:9000
-            - 9001:9001
-        volumes:
-            - ./storage/minio:/data
-        environment:
-            - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-            - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-            - MINIO_OPTS="--console-address :9001"
-            - MINIO_SERVER_URL=${PUBLIC_MINIO_ENDPOINT}:${PUBLIC_MINIO_PORT}
-        restart: unless-stopped
-        command: server /data --console-address ":9001"
+    image: minio/minio
+    ports:
+      - "9090:9000"  # Only for direct access if needed
+      - "9091:9001"  # Only for direct access if needed
+    volumes:
+      - ./storage/minio:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_OPTS="--console-address :9001"
+      # Tell MinIO that it's accessible via s3.jam.local
+      - MINIO_SERVER_URL=http://s3.jam.local
+      # Add custom domain for browser redirect
+      - MINIO_BROWSER_REDIRECT_URL=http://console.s3.jam.local
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    networks:
+      - jam_network
+    hostname: minio
+  
   #creates buckets in minio so they are available when the app starts
   minio-init:
     image: minio/mc
@@ -69,6 +107,8 @@ services:
       "
     # ensure it only runs once
     restart: "on-failure"
+    networks:
+      - jam_network
   # postgres:
   #   image: postgres:14
   #   restart: always
