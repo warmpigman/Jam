@@ -1,0 +1,289 @@
+/* Custom toast animations */
+@keyframes toast-slide-in-right {
+  from {
+    transform: translateX(calc(100% + 1rem));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(calc(100% + 1rem));
+    opacity: 0;
+  }
+}
+
+/* Toast positioning and animations - Force a single stack */
+[data-sonner-toaster] {
+  position: fixed !important;
+  top: 1rem !important;
+  right: 1rem !important;
+  bottom: auto !important;
+  left: auto !important;
+  z-index: 9999 !important;
+  pointer-events: none !important; /* Allow clicks to pass through container */
+  max-width: 400px !important;
+  width: 100% !important;
+}
+
+/* Each toast needs pointer events to be interactive */
+[data-sonner-toast] {
+  pointer-events: auto !important;
+}
+
+/* Base toast styling */
+[data-sonner-toast] {
+  border-radius: 0.5rem !important;
+  padding: 1rem !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.1) !important;
+  min-width: 300px !important;
+  max-width: 400px !important;
+  transition: all 0.2s ease-out !important;
+  transform-origin: top right !important;
+  cursor: pointer !important;
+  touch-action: pan-x !important;
+  margin: 0 !important; /* Remove margin from individual toasts */
+  
+  /* Default collapsed state */
+  height: 50px !important;
+  overflow: hidden !important;
+  
+  /* Animation for entering */
+  animation: toast-slide-in-right 0.3s ease-out;
+}
+
+/* Cascading effect - each toast gets smaller and offset */
+[data-sonner-toaster][data-y-position="top"] li:nth-child(1) [data-sonner-toast] {
+  transform: translateY(0px) scale(1) !important;
+  z-index: 1000 !important;
+}
+
+[data-sonner-toaster][data-y-position="top"] li:nth-child(2) [data-sonner-toast] {
+  transform: translateY(-6px) scale(0.96) !important;
+  z-index: 999 !important;
+}
+
+[data-sonner-toaster][data-y-position="top"] li:nth-child(3) [data-sonner-toast] {
+  transform: translateY(-12px) scale(0.92) !important;
+  z-index: 998 !important;
+}
+
+[data-sonner-toaster][data-y-position="top"] li:nth-child(4) [data-sonner-toast] {
+  transform: translateY(-18px) scale(0.88) !important;
+  z-index: 997 !important;
+}
+
+[data-sonner-toaster][data-y-position="top"] li:nth-child(5) [data-sonner-toast] {
+  transform: translateY(-24px) scale(0.84) !important;
+  z-index: 996 !important;
+}
+
+/* Hover container to expand when hovering over the toaster area */
+[data-sonner-toaster]:hover [data-sonner-toast] {
+  height: auto !important;
+  max-height: none !important;
+  transform: translateY(0px) scale(1) !important;
+  z-index: auto !important;
+  margin-bottom: 4px !important; /* Consistent gap on hover */
+}
+
+/* Individual toast hover effect */
+[data-sonner-toast]:hover {
+  height: auto !important;
+  max-height: none !important;
+  transform: translateY(0px) scale(1.02) !important;
+  z-index: 10001 !important;
+}
+
+/* Animation for removing toast */
+[data-sonner-toast][data-removed="true"] {
+  animation: toast-slide-out-right 0.2s ease-in forwards !important;
+}
+
+/* Success toast styling - Green */
+[data-sonner-toast].toast-success,
+[data-sonner-toast][data-type="success"] {
+  background: oklch(0.45 0.18 145) !important;
+  color: oklch(0.98 0.02 145) !important;
+  border: 2px solid oklch(0.55 0.2 145) !important;
+}
+
+[data-sonner-toast].toast-success [data-title],
+[data-sonner-toast][data-type="success"] [data-title] {
+  color: oklch(0.98 0.02 145) !important;
+  font-weight: 600 !important;
+}
+
+[data-sonner-toast].toast-success [data-description],
+[data-sonner-toast][data-type="success"] [data-description] {
+  color: oklch(0.95 0.05 145) !important;
+  opacity: 0.95 !important;
+}
+
+[data-sonner-toast].toast-success [data-icon],
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: oklch(0.98 0.02 145) !important;
+}
+
+/* Warning toast styling - Yellow/Orange */
+[data-sonner-toast].toast-warning,
+[data-sonner-toast][data-type="warning"] {
+  background: oklch(0.55 0.2 85) !important;
+  color: oklch(0.98 0.02 85) !important;
+  border: 2px solid oklch(0.65 0.22 85) !important;
+}
+
+[data-sonner-toast].toast-warning [data-title],
+[data-sonner-toast][data-type="warning"] [data-title] {
+  color: oklch(0.98 0.02 85) !important;
+  font-weight: 600 !important;
+}
+
+[data-sonner-toast].toast-warning [data-description],
+[data-sonner-toast][data-type="warning"] [data-description] {
+  color: oklch(0.95 0.05 85) !important;
+  opacity: 0.95 !important;
+}
+
+[data-sonner-toast].toast-warning [data-icon],
+[data-sonner-toast][data-type="warning"] [data-icon] {
+  color: oklch(0.98 0.02 85) !important;
+}
+
+/* Error toast styling - Red */
+[data-sonner-toast].toast-error,
+[data-sonner-toast][data-type="error"] {
+  background: oklch(0.5 0.22 25) !important;
+  color: oklch(0.98 0.02 25) !important;
+  border: 2px solid oklch(0.6 0.24 25) !important;
+}
+
+[data-sonner-toast].toast-error [data-title],
+[data-sonner-toast][data-type="error"] [data-title] {
+  color: oklch(0.98 0.02 25) !important;
+  font-weight: 600 !important;
+}
+
+[data-sonner-toast].toast-error [data-description],
+[data-sonner-toast][data-type="error"] [data-description] {
+  color: oklch(0.95 0.05 25) !important;
+  opacity: 0.95 !important;
+}
+
+[data-sonner-toast].toast-error [data-icon],
+[data-sonner-toast][data-type="error"] [data-icon] {
+  color: oklch(0.98 0.02 25) !important;
+}
+
+/* Loading toast styling - Blue */
+[data-sonner-toast].toast-loading,
+[data-sonner-toast][data-type="loading"] {
+  background: oklch(0.45 0.18 245) !important;
+  color: oklch(0.98 0.02 245) !important;
+  border: 2px solid oklch(0.55 0.2 245) !important;
+}
+
+[data-sonner-toast].toast-loading [data-title],
+[data-sonner-toast][data-type="loading"] [data-title] {
+  color: oklch(0.98 0.02 245) !important;
+  font-weight: 600 !important;
+}
+
+[data-sonner-toast].toast-loading [data-description],
+[data-sonner-toast][data-type="loading"] [data-description] {
+  color: oklch(0.95 0.05 245) !important;
+  opacity: 0.95 !important;
+}
+
+[data-sonner-toast].toast-loading [data-icon],
+[data-sonner-toast][data-type="loading"] [data-icon] {
+  color: oklch(0.98 0.02 245) !important;
+}
+
+/* Toast content styling */
+[data-sonner-toast] [data-content] {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 0.75rem !important;
+  width: 100% !important;
+}
+
+[data-sonner-toast] [data-icon] {
+  flex-shrink: 0 !important;
+  margin-top: 0.125rem !important;
+}
+
+[data-sonner-toast] [data-title] {
+  font-size: 0.875rem !important;
+  line-height: 1.25rem !important;
+  margin-bottom: 0.25rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+[data-sonner-toast] [data-description] {
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Expand description on hover */
+[data-sonner-toast]:hover [data-title],
+[data-sonner-toaster]:hover [data-sonner-toast] [data-title] {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+
+[data-sonner-toast]:hover [data-description],
+[data-sonner-toaster]:hover [data-sonner-toast] [data-description] {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+}
+
+/* Hide close button completely */
+[data-sonner-toast] [data-close-button] {
+  display: none !important;
+}
+
+/* Make sure toasts can be swiped - support all toasts being dismissible */
+[data-sonner-toast][data-swiping="true"] {
+  transform: translateX(var(--swipe-amount, 0)) !important;
+  transition: none !important;
+}
+
+/* Ensure proper stacking in container */
+[data-sonner-toaster] > ol {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Control the gap between toasts in the list */
+[data-sonner-toaster] > ol > li {
+  margin-bottom: 4px !important;
+  position: relative !important;
+}
+
+/* Fix z-index issues with multiple toast stacks */
+[data-sonner-toaster] > ol > li:not(:first-child) {
+  margin-top: -40px !important; /* Create proper overlap */
+}
+
+/* Fix for toast ID conflicts - ensure only one instance of each toast */
+[data-sonner-toast][data-mounted] {
+  opacity: 1 !important;
+  transform: none !important;
+}

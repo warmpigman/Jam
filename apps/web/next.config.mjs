@@ -3,7 +3,7 @@ const nextConfig = {
   transpilePackages: ["@workspace/ui"],
   experimental: {
     serverActions: {
-      // Maximum upload file size (configured to 5GB)
+      // Maximum upload file size (configured to 5GB) idk how to get this to use the .env
       // If you need to change this value, update it here and also in nginx/conf.d/default.conf
       bodySizeLimit: '5gb',
     },
