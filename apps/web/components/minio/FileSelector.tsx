@@ -61,7 +61,7 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
         )}
       />
       <p className="mb-2" style={{ color: "oklch(0.985 0 0)" }}>
-        {isDragOver ? "Drop files here" : "Select files to upload"}
+        {isDragOver ? "Drop files here" : "Select files to upload!"}
       </p>
       <p className="text-sm" style={{ color: "oklch(0.705 0.015 286.067)" }}>
         Drag and drop or click to browse
