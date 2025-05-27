@@ -46,9 +46,22 @@ const MinioTestPage: React.FC = React.memo(() => {
     totalSpeed: 0,
   });
   
-  // Additional state for tracking upload progress
-  const [lastLoaded, setLastLoaded] = useState<number>(0);
-  const [lastTime, setLastTime] = useState<number>(Date.now());
+  // Additional state for tracking upload progress - using refs to avoid stale closures
+  const speedTrackingRef = useRef<{
+    fileStartTimes: Record<number, number>;
+    filePreviousLoaded: Record<number, number>;
+    filePreviousTime: Record<number, number>;
+    globalStartTime: number;
+    globalPreviousLoaded: number;
+    globalPreviousTime: number;
+  }>({
+    fileStartTimes: {},
+    filePreviousLoaded: {},
+    filePreviousTime: {},
+    globalStartTime: 0,
+    globalPreviousLoaded: 0,
+    globalPreviousTime: 0,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = useCallback(async () => {
@@ -183,6 +196,17 @@ const MinioTestPage: React.FC = React.memo(() => {
       return;
     }
 
+    // Reset speed tracking
+    const now = Date.now();
+    speedTrackingRef.current = {
+      fileStartTimes: {},
+      filePreviousLoaded: {},
+      filePreviousTime: {},
+      globalStartTime: now,
+      globalPreviousLoaded: 0,
+      globalPreviousTime: now,
+    };
+
     setUploadState((prev: UploadState) => ({
       ...prev,
       isUploading: true,
@@ -197,9 +221,6 @@ const MinioTestPage: React.FC = React.memo(() => {
       totalSpeed: 0,
       transferSpeed: 0,
     }));
-    
-    setLastLoaded(0);
-    setLastTime(Date.now());
     
     // Calculate total size for all files
     let totalSize = 0;
@@ -321,6 +342,12 @@ const MinioTestPage: React.FC = React.memo(() => {
     const formData = new FormData();
     formData.append('file', file);
 
+    // Initialize tracking for this file
+    const now = Date.now();
+    speedTrackingRef.current.fileStartTimes[index] = now;
+    speedTrackingRef.current.filePreviousLoaded[index] = 0;
+    speedTrackingRef.current.filePreviousTime[index] = now;
+
     setUploadState((prev: UploadState) => ({
       ...prev,
       fileProgresses: { ...prev.fileProgresses, [index]: 0 },
@@ -335,60 +362,72 @@ const MinioTestPage: React.FC = React.memo(() => {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      const startTime = Date.now();
-      let lastBytesUploaded = 0;
 
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable) {
           const percentComplete = Math.round((event.loaded / event.total) * 100);
+          const currentTime = Date.now();
           
+          // Update file progress
           setUploadState((prev: UploadState) => ({
             ...prev,
             fileProgresses: { ...prev.fileProgresses, [index]: percentComplete }
           }));
           
+          // Calculate individual file speed using delta time
+          const previousTime = speedTrackingRef.current.filePreviousTime[index];
+          const previousLoaded = speedTrackingRef.current.filePreviousLoaded[index];
+          
+          if (previousTime !== undefined && previousLoaded !== undefined) {
+            const timeDelta = (currentTime - previousTime) / 1000;
+            const bytesDelta = event.loaded - previousLoaded;
+            
+            // Only update speed if we have significant time delta (avoid division by near-zero)
+            if (timeDelta >= 0.5 && bytesDelta > 0) {
+              const currentFileSpeed = bytesDelta / timeDelta;
+              
+              // Update tracking for this file
+              speedTrackingRef.current.filePreviousLoaded[index] = event.loaded;
+              speedTrackingRef.current.filePreviousTime[index] = currentTime;
+              
+              // Calculate global speed using total bytes uploaded across all files
+              const globalTimeDelta = (currentTime - speedTrackingRef.current.globalPreviousTime) / 1000;
+              
+              if (globalTimeDelta >= 0.1) {
+                setUploadState((prev: UploadState) => {
+                  const newTotalBytesUploaded = prev.totalBytesUploaded + bytesDelta;
+                  const totalElapsed = (currentTime - speedTrackingRef.current.globalStartTime) / 1000;
+                  
+                  // Calculate average speed over entire upload duration for stability
+                  const averageGlobalSpeed = totalElapsed > 0 ? newTotalBytesUploaded / totalElapsed : 0;
+                  
+                  // For current file being actively uploaded, use more responsive calculation
+                  const updatedTransferSpeed = index === prev.activeFileIndex ? 
+                    (prev.transferSpeed === 0 ? currentFileSpeed : (prev.transferSpeed * 0.7 + currentFileSpeed * 0.3)) :
+                    prev.transferSpeed;
+                  
+                  return {
+                    ...prev,
+                    uploadProgress: percentComplete,
+                    transferSpeed: updatedTransferSpeed,
+                    totalBytesUploaded: newTotalBytesUploaded,
+                    totalSpeed: averageGlobalSpeed,
+                  };
+                });
+                
+                // Update global tracking
+                speedTrackingRef.current.globalPreviousTime = currentTime;
+              }
+            }
+          }
+          
+          // Show progress toasts at key milestones
           if (percentComplete % 25 === 0 || percentComplete === 100) {
             toast.loading(`${percentComplete}% Complete`, {
               description: file.name,
               id: toastId,
               position: "top-right",
             });
-          }
-
-          if (index === uploadState.activeFileIndex) {
-            const currentTime = Date.now();
-            const timeElapsed = (currentTime - lastTime) / 1000;
-            
-            if (timeElapsed >= 0.5 && event.loaded > lastLoaded) {
-              const bytesTransferred = event.loaded - lastLoaded;
-              const speed = bytesTransferred / timeElapsed;
-              
-              setUploadState((prev: UploadState) => ({
-                ...prev,
-                uploadProgress: percentComplete,
-                transferSpeed: prev.transferSpeed === 0 ? speed : (prev.transferSpeed * 0.8 + speed * 0.2)
-              }));
-              
-              setLastLoaded(event.loaded);
-              setLastTime(currentTime);
-            }
-          }
-          
-          const currentBytesUploaded = event.loaded;
-          const bytesAdded = currentBytesUploaded - lastBytesUploaded;
-          
-          if (bytesAdded > 0) {
-            setUploadState((prev: UploadState) => ({ ...prev, totalBytesUploaded: prev.totalBytesUploaded + bytesAdded }));
-            lastBytesUploaded = currentBytesUploaded;
-            
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 0) {
-              const fileSpeed = currentBytesUploaded / elapsed;
-              setUploadState((prev: UploadState) => ({
-                ...prev,
-                totalSpeed: prev.totalSpeed === 0 ? fileSpeed : (prev.totalSpeed * 0.8 + fileSpeed * 0.2)
-              }));
-            }
           }
           
           if (percentComplete === 100) {
