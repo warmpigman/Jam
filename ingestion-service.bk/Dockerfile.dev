@@ -1,0 +1,10 @@
+FROM node:20-bullseye
+
+WORKDIR /app
+ENV NODE_ENV=development
+
+COPY . .
+
+WORKDIR /app/apps/ingestion-service
+EXPOSE 3001
+CMD ["yarn", "dev"]

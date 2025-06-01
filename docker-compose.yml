@@ -38,13 +38,51 @@ services:
     restart: unless-stopped
     networks:
       - jam_network
-    # - postgres
-    # - qdrant
-    # - neo4j
-    # - caldav
-    # - embed-service
-    # - summarization-service
-    # - scheduler-service
+
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: apps/ingestion-service/Dockerfile.dev
+    environment:
+      # MinIO Configuration
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_INGESTION_BUCKET=documents
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # MongoDB Configuration
+      - MONGODB_URI=mongodb://mongo:27017/jam_ingestion
+      - MONGODB_DATABASE=jam_ingestion
+      # Ollama Configuration
+      - OLLAMA_HOST=172.16.0.170
+      - OLLAMA_PORT=11434
+      - OLLAMA_TEXT_MODEL=nomic-embed-text
+      - OLLAMA_IMAGE_MODEL=nomic-embed-vision
+      # Service Configuration
+      - NODE_ENV=development
+      - PORT=3001
+      - LOG_LEVEL=debug
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/ingestion-service/src:/app/apps/ingestion-service/src
+      - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
+      - ./apps/ingestion-service/tsconfig.json:/app/apps/ingestion-service/tsconfig.json
+      - ./apps/ingestion-service/nodemon.json:/app/apps/ingestion-service/nodemon.json
+    depends_on:
+      - minio
+      - redis
+      - mongo
+    restart: unless-stopped
+    networks:
+      - jam_network
   
   nginx:
     image: nginx:alpine
@@ -79,6 +117,10 @@ services:
       - MINIO_SERVER_URL=http://s3.jam.local
       # Add custom domain for browser redirect
       - MINIO_BROWSER_REDIRECT_URL=http://console.s3.jam.local
+      # Configure webhook for ingestion service using environment variables
+      # - MINIO_NOTIFY_WEBHOOK_ENABLE_INGESTION=on
+      # - MINIO_NOTIFY_WEBHOOK_ENDPOINT_INGESTION=http://ingestion-service:3001/webhook/minio
+      # - MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_INGESTION=${MINIO_WEBHOOK_TOKEN}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     networks:
@@ -87,111 +129,112 @@ services:
   
   #creates buckets in minio so they are available when the app starts
   minio-init:
-    image: minio/mc
+    build:
+      context: .
+      dockerfile: docker/minio-init/Dockerfile
     depends_on:
       - minio
+      - ingestion-service
     entrypoint: >
-      sh -c "
+      bash -c "
         # wait until MinIO API is responsive
         until mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
         do echo 'Waiting for MinIO…' && sleep 2;
         done;
+        
+        # wait until ingestion service is responsive using curl
+        until curl -f http://ingestion-service:3001/health;
+        do echo 'Waiting for ingestion service…' && sleep 2;
+        done;
+        
         # create your buckets if they don't already exist
         mc mb local/documents   || true;
         mc mb local/avatars     || true;
         mc mb local/notes-media || true;
         mc mb local/thumbnails  || true;
         mc mb local/temp        || true;
+        mc mb local/embeddings  || true;
+        
+        echo 'Buckets created, checking webhook configuration...';
+        
+        # Remove any existing event notifications to avoid conflicts
+        mc event remove local/documents --force || true;
+        
+        echo 'Setting up bucket notifications...';
+        
+        # Enable bucket notifications for ingestion service
+        echo "${MINIO_WEBHOOK_TOKEN}"
+        mc admin config set local notify_webhook:1 endpoint="http://ingestion-service:3001/webhook/minio" auth_token="${MINIO_WEBHOOK_TOKEN}"
+        # Restart the MinIO service to apply the new configuration
+        mc admin service restart local;
+        echo 'Configuring bucket notifications for documents bucket...';
+        # The webhook endpoint is configured via environment variables
+        mc event add local/documents arn:minio:sqs::1:webhook --event put,delete 
+        #--suffix .pdf,.docx,.txt,.png,.jpg,.jpeg,.mp3,.mp4,.mov,.avi;
 
-        echo 'Default buckets ensured';
+        echo 'Bucket notifications configured successfully!';
+        echo 'Upload files to the documents bucket to trigger the ingestion service.';
       "
     # ensure it only runs once
-    restart: "on-failure"
+    restart: "no"
     networks:
       - jam_network
-  # postgres:
-  #   image: postgres:14
-  #   restart: always
-  #   environment:
-  #     POSTGRES_USER: nextai
-  #     POSTGRES_PASSWORD: changeme
-  #     POSTGRES_DB: nextai
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - jam_network
+    hostname: redis
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-changeme}
+      - MONGO_INITDB_DATABASE=jam_ingestion
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    restart: unless-stopped
+    networks:
+      - jam_network
+    hostname: mongo
+
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
   #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
-
-  # qdrant:
-  #   image: qdrant/qdrant:latest
-  #   restart: always
-  #   ports:
-  #     - "6333:6333"
-  #   volumes:
-  #     - qdrant_data:/qdrant/storage
-
-  # neo4j:
-  #   image: neo4j:4.4
-  #   restart: always
-  #   environment:
-  #     NEO4J_AUTH: "neo4j/secret"
-  #   ports:
-  #     - "7474:7474"
-  #     - "7687:7687"
-  #   volumes:
-  #     - neo4j_data:/data
-
-  # caldav:
-  #   image: tomassedovic/radicale:latest
-  #   restart: always
-  #   ports:
-  #     - "5232:5232"
-  #   volumes:
-  #     - caldav_data:/var/lib/radicale
-
-  # embed-service:
-  #   build:
-  #     context: .
-  #     dockerfile: packages/embed/Dockerfile
-  #   restart: on-failure
-  #   environment:
-  #     DATABASE_URL: postgres://nextai:changeme@postgres:5432/nextai
-  #     QDRANT_URL: http://qdrant:6333
-  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
-  #   depends_on:
-  #     - postgres
-  #     - qdrant
-  #   ports:
-  #     - "5001:5001"
-
-  # summarization-service:
-  #   build:
-  #     context: .
-  #     dockerfile: packages/summarize/Dockerfile
-  #   restart: on-failure
-  #   environment:
-  #     DATABASE_URL: postgres://nextai:changeme@postgres:5432/nextai
-  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
-  #   depends_on:
-  #     - postgres
-  #   ports:
-  #     - "5002:5002"
-
-  # scheduler-service:
-  #   build:
-  #     context: .
-  #     dockerfile: packages/scheduler/Dockerfile
-  #   restart: on-failure
-  #   environment:
-  #     CALDAV_URL: http://caldav:5232
-  #     CALDAV_USER: user
-  #     CALDAV_PASSWORD: pass
-  #   depends_on:
-  #     - caldav
-  #   ports:
-  #     - "5003:5003"
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   networks:
+  #     - jam_network
+  #   hostname: ollama
+  #   # Pull required models on startup
+  #   entrypoint: >
+  #     sh -c "
+  #       ollama serve &
+  #       sleep 5;
+  #       ollama pull nomic-embed-text;
+  #       ollama pull nomic-embed-vision;
+  #       wait;
+  #     "
 
 # volumes:
   # postgres_data:
   # qdrant_data:
   # neo4j_data:
   # caldav_data:
+volumes:
+  redis_data:
+  mongo_data:
+  mongo_config:
+  ollama_data:
