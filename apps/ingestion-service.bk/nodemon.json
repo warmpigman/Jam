@@ -1,0 +1,24 @@
+{
+  "watch": ["src"],
+  "ext": "ts,js,json",
+  "ignore": ["src/**/*.spec.ts", "src/**/*.test.ts", "node_modules"],
+"exec": "sh -c 'tsx --trace-warnings src/index.ts'",
+  "env": {
+    "NODE_ENV": "development",
+    "DEBUG": "*",
+    "FORCE_COLOR": "1"
+  },
+  "verbose": true,
+  "delay": 1000,
+  "restartable": "rs",
+  "colours": true,
+  "legacyWatch": false,
+  "signal": "SIGTERM",
+  "stdout": true,
+  "stderr": true,
+  "events": {
+    "restart": "echo '🔄 nodemon restarting due to changes...'",
+    "start": "echo '🚀 nodemon starting app...'",
+    "quit": "echo '👋 nodemon shutting down...'"
+  }
+}

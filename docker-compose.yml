@@ -7,7 +7,6 @@ networks:
 
 services:
   web:
-    # for prod, change to apps/web/Dockerfile
     build:
       context: .
       dockerfile: apps/web/Dockerfile.dev
@@ -43,6 +42,8 @@ services:
     build:
       context: .
       dockerfile: apps/ingestion-service/Dockerfile.dev
+    tty: true
+    stdin_open: true
     environment:
       # MinIO Configuration
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -60,6 +61,12 @@ services:
       # MongoDB Configuration
       - MONGODB_URI=mongodb://mongo:27017/jam_ingestion
       - MONGODB_DATABASE=jam_ingestion
+      # LanceDB Configuration  
+      - LANCEDB_URI=s3://embeddings/
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_REGION=us-east-1
       # Ollama Configuration
       - OLLAMA_HOST=172.16.0.170
       - OLLAMA_PORT=11434
@@ -68,14 +75,15 @@ services:
       # Service Configuration
       - NODE_ENV=development
       - PORT=3001
-      - LOG_LEVEL=debug
+      # - DEBUG=*
+      # - LOG_LEVEL=debug
     ports:
       - "3001:3001"
     volumes:
       - ./apps/ingestion-service/src:/app/apps/ingestion-service/src
       - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
       - ./apps/ingestion-service/tsconfig.json:/app/apps/ingestion-service/tsconfig.json
-      - ./apps/ingestion-service/nodemon.json:/app/apps/ingestion-service/nodemon.json
+      # - ./apps/ingestion-service/nodemon.json:/app/apps/ingestion-service/nodemon.json
     depends_on:
       - minio
       - redis
