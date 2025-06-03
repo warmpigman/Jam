@@ -1,25 +1,43 @@
-import sys
 import os
+import io
+import base64
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel, AutoImageProcessor
 from PIL import Image
+from flask import Flask, request, jsonify
 
 TEXT_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 VISION_MODEL = "nomic-ai/nomic-embed-vision-v1.5"
 CACHE_DIR = "./hf_cache"
 
+# Load models at startup
+PRELOAD_MODELS = True
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 
-def is_image(filename):
-    ext = os.path.splitext(filename)[1].lower()
-    return ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp']
+app = Flask(__name__)
 
-def embed_text(text):
+preloaded = {
+    "text_tokenizer": None,
+    "text_model": None,
+    "vision_processor": None,
+    "vision_model": None,
+}
+
+def load_text_model_and_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL, cache_dir=CACHE_DIR, trust_remote_code=True, use_fast=True)
     model = AutoModel.from_pretrained(TEXT_MODEL, cache_dir=CACHE_DIR, trust_remote_code=True).to(device)
     model.eval()
+    return tokenizer, model
+
+def load_vision_model_and_processor():
+    processor = AutoImageProcessor.from_pretrained(VISION_MODEL, cache_dir=CACHE_DIR, use_fast=True)
+    model = AutoModel.from_pretrained(VISION_MODEL, cache_dir=CACHE_DIR, trust_remote_code=True).to(device)
+    model.eval()
+    return processor, model
+
+def embed_text(text, tokenizer, model):
     encoded_input = tokenizer([text], padding=True, truncation=True, return_tensors='pt').to(device)
     with torch.no_grad():
         model_output = model(**encoded_input)
@@ -29,11 +47,15 @@ def embed_text(text):
         embedding = F.normalize(pooled, p=2, dim=1)
     return embedding[0].cpu().tolist()
 
-def embed_image(image_path):
-    processor = AutoImageProcessor.from_pretrained(VISION_MODEL, cache_dir=CACHE_DIR, use_fast=True)
-    model = AutoModel.from_pretrained(VISION_MODEL, cache_dir=CACHE_DIR, trust_remote_code=True).to(device)
-    model.eval()
-    image = Image.open(image_path).convert('RGB')
+def decode_base64_image(base64_string):
+    if ',' in base64_string:
+        base64_string = base64_string.split(',')[1]
+    image_bytes = base64.b64decode(base64_string)
+    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    return image
+
+def embed_image_base64(base64_string, processor, model):
+    image = decode_base64_image(base64_string)
     inputs = processor(image, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     with torch.no_grad():
@@ -42,19 +64,48 @@ def embed_image(image_path):
         embedding = F.normalize(img_emb, p=2, dim=1)
     return embedding[0].cpu().tolist()
 
-def main(filepath):
-    if is_image(filepath):
-        print(f"Detected image file: {filepath}")
-        embedding = embed_image(filepath)
+@app.route('/embed', methods=['POST'])
+def embed():
+    """
+    POST JSON:
+    {
+      "type": "text" or "image",
+      "data": "text string" or "base64-encoded image string"
+    }
+    """
+    req = request.get_json()
+    if not req or 'type' not in req or 'data' not in req:
+        return jsonify({"error": "Request must contain 'type' and 'data'"}), 400
+
+    if req['type'] == 'text':
+        if PRELOAD_MODELS:
+            tokenizer = preloaded["text_tokenizer"]
+            model = preloaded["text_model"]
+        else:
+            tokenizer, model = load_text_model_and_tokenizer()
+        embedding = embed_text(req['data'], tokenizer, model)
+        if not PRELOAD_MODELS:
+            del model  # Free memory!
+        return jsonify({"embedding": embedding})
+
+    elif req['type'] == 'image':
+        if PRELOAD_MODELS:
+            processor = preloaded["vision_processor"]
+            model = preloaded["vision_model"]
+        else:
+            processor, model = load_vision_model_and_processor()
+        embedding = embed_image_base64(req['data'], processor, model)
+        if not PRELOAD_MODELS:
+            del model
+        return jsonify({"embedding": embedding})
+
     else:
-        print(f"Detected text file: {filepath}")
-        with open(filepath, 'r', encoding='utf-8') as f:
-            text = f.read().strip()
-        embedding = embed_text(text)
-    print("Embedding vector:", embedding)
+        return jsonify({"error": "Invalid type. Must be 'text' or 'image'."}), 400
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("python embed_nomic.py <path-to-text-or-image-file>")
-        sys.exit(1)
-    main(sys.argv[1])
+    if PRELOAD_MODELS:
+        print("Preloading models into memory...")
+        preloaded["text_tokenizer"], preloaded["text_model"] = load_text_model_and_tokenizer()
+        preloaded["vision_processor"], preloaded["vision_model"] = load_vision_model_and_processor()
+        print("Models loaded.")
+    app.run(host="0.0.0.0", port=8080)
