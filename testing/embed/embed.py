@@ -196,5 +196,3 @@ if __name__ == "__main__":
         print("Models loaded.")
     ensure_collection_exists()
     app.run(host="0.0.0.0", port=8080)
-12:50 30
-
