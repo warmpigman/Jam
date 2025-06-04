@@ -1,4 +1,5 @@
 import { Geist, Geist_Mono } from "next/font/google"
+import { Metadata } from 'next'
 
 import "@workspace/ui/globals.css"
 import { Providers } from "@/components/providers"
@@ -12,6 +13,31 @@ const fontMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
 })
+
+export const metadata: Metadata = {
+  title: "Jam",
+  description: "An extensive file management system",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    title: "Jam",
+    description: "An extensive file management system",
+    url: "https://jam.dummyload.com",
+    siteName: "Jam",
+    images: [
+      {
+        url: "https://jam.dummyload.com/apple-icon.png",
+        width: 192,
+        height: 192,
+        alt: "Jam Embed Image",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+}
 
 export default function RootLayout({
   children,
