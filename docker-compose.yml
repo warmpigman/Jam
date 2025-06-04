@@ -13,13 +13,13 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT=s3.jam.local
+      - NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT=${NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT}
       - NEXT_PUBLIC_PUBLIC_MINIO_PORT=80
       - NEXT_PUBLIC_PUBLIC_MINIO_USE_SSL=false
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-      - PUBLIC_DOMAIN=jam.local
-      - PUBLIC_S3_DOMAIN=s3.jam.local
+      - PUBLIC_DOMAIN=${PUBLIC_DOMAIN}
+      - PUBLIC_S3_DOMAIN=${PUBLIC_S3_DOMAIN}
     ports:
       - "3000:3000"
     volumes:
@@ -28,8 +28,8 @@ services:
       - /app/storage
     # Add proper DNS resolution with extra_hosts
     extra_hosts:
-      - "s3.jam.local:172.17.0.1"
-      - "jam.local:172.17.0.1"
+      - "${PUBLIC_S3_DOMAIN}:172.17.0.1"
+      - "${PUBLIC_DOMAIN}:172.17.0.1"
     depends_on:
       - minio
       - minio-init
@@ -108,8 +108,8 @@ services:
     # Define proper hostnames for the nginx container
     hostname: nginx
     extra_hosts:
-      - "s3.jam.local:127.0.0.1"
-      - "jam.local:127.0.0.1"
+      - "${PUBLIC_S3_DOMAIN}:127.0.0.1"
+      - "${PUBLIC_DOMAIN}:127.0.0.1"
   
   minio:
     image: minio/minio
@@ -122,10 +122,10 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - MINIO_OPTS="--console-address :9001"
-      # Tell MinIO that it's accessible via s3.jam.local
-      - MINIO_SERVER_URL=http://s3.jam.local
+      # Tell MinIO that it's accessible via it's domain
+      - MINIO_SERVER_URL=${MINIO_URL}
       # Add custom domain for browser redirect
-      - MINIO_BROWSER_REDIRECT_URL=http://console.s3.jam.local
+      # - MINIO_BROWSER_REDIRECT_URL=http://console.s3.jam.local
       # Configure webhook for ingestion service using environment variables
       # - MINIO_NOTIFY_WEBHOOK_ENABLE_INGESTION=on
       # - MINIO_NOTIFY_WEBHOOK_ENDPOINT_INGESTION=http://ingestion-service:3001/webhook/minio
@@ -254,6 +254,14 @@ services:
     restart: unless-stopped
     networks:
       - jam_network
+  #temporary for shipping for neighborhood
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    restart: unless-stopped
+    networks:
+      - jam_network
+
   # ollama:
   #   image: ollama/ollama:latest
   #   ports:
