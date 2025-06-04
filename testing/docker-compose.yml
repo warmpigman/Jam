@@ -1,0 +1,53 @@
+version: "3.8"
+
+networks:
+  testing_network:
+    driver: bridge
+
+services:
+  embed-service:
+    build:
+      context: ./embed
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount source code for hot reload
+      - ./embed:/app:delegated
+      # Persistent cache volumes
+      - hf_cache:/app/hf_cache
+      - pip_cache:/app/pip_cache
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/hf_cache
+      - TRANSFORMERS_CACHE=/app/hf_cache
+      - PIP_CACHE_DIR=/app/pip_cache
+    restart: unless-stopped
+    networks:
+      - testing_network
+    # For GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - testing_network
+
+volumes:
+  hf_cache:
+  pip_cache:
+  qdrant_data:
