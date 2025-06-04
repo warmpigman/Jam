@@ -31,7 +31,6 @@ services:
       - "s3.jam.local:172.17.0.1"
       - "jam.local:172.17.0.1"
     depends_on:
-      - nginx
       - minio
       - minio-init
     restart: unless-stopped
@@ -100,6 +99,8 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     depends_on:
+      - web
+      - ingestion-service
       - minio
     restart: unless-stopped
     networks:
@@ -194,7 +195,7 @@ services:
       - "6379:6379"
     command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
     volumes:
-      - redis_data:/data
+      - ./storage/redis:/data
     restart: unless-stopped
     networks:
       - jam_network
@@ -209,13 +210,50 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-changeme}
       - MONGO_INITDB_DATABASE=jam_ingestion
     volumes:
-      - mongo_data:/data/db
-      - mongo_config:/data/configdb
+      - ./storage/mongo/data:/data/db
+      - ./storage/mongo/config:/data/configdb
     restart: unless-stopped
     networks:
       - jam_network
     hostname: mongo
-
+  embed-service:
+    build:
+      context: ./docker/embed
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/embed:/app:delegated
+      # Persistent cache volumes
+      # - hf_cache:/app/hf_cache
+      # - pip_cache:/app/pip_cache
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/hf_cache
+      - TRANSFORMERS_CACHE=/app/hf_cache
+      - PIP_CACHE_DIR=/app/pip_cache
+    restart: unless-stopped
+    networks:
+      - jam_network
+    # For GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./storage/qdrant:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - jam_network
   # ollama:
   #   image: ollama/ollama:latest
   #   ports:
@@ -241,8 +279,8 @@ services:
   # qdrant_data:
   # neo4j_data:
   # caldav_data:
-volumes:
-  redis_data:
-  mongo_data:
-  mongo_config:
-  ollama_data:
+# volumes:
+#   redis_data:
+#   mongo_data:
+#   mongo_config:
+#   ollama_data:

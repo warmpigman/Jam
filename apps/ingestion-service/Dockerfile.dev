@@ -14,7 +14,7 @@ COPY packages/ ./packages/
 COPY apps/ingestion-service/package.json ./apps/ingestion-service/
 
 # Install dependencies
-# RUN yarn install --frozen-lockfile
+RUN yarn install --frozen-lockfile
 
 # Copy source code
 COPY apps/ingestion-service/ ./apps/ingestion-service/
