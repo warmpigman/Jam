@@ -7,17 +7,20 @@ import { toast } from "sonner";
 import { CheckCircle, AlertCircle } from "lucide-react";
 import { FileObject } from './types';
 import { formatFileSize, getFileIcon } from './utils';
+import { cn } from "@workspace/ui/lib/utils";
 
 interface FilesTableProps {
   files: FileObject[];
   isDeleting: string | null;
   onDeleteFile: (fileName: string) => void;
+  highlightedFile?: string | null;
 }
 
 export const FilesTable: React.FC<FilesTableProps> = ({
   files,
   isDeleting,
   onDeleteFile,
+  highlightedFile
 }) => {
   const handleDownload = (file: FileObject) => {
     toast.success("Download Started", {
@@ -54,9 +57,12 @@ export const FilesTable: React.FC<FilesTableProps> = ({
         </thead>
         <tbody>
           {files.map((file) => (
-            <tr 
-              key={file.name} 
-              className="hover:bg-muted/50 border-b" 
+            <tr
+              key={file.name}
+              className={cn(
+                "hover:bg-muted/50 border-b transition-all duration-300",
+                highlightedFile === file.name && "bg-primary/10 border-l-4 border-primary animate-pulse"
+              )}
               style={{ borderColor: "oklch(1 0 0 / 10%)" }}
             >
               <td className="py-4">

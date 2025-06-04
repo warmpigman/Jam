@@ -3,6 +3,7 @@ export interface FileObject {
   size: number;
   lastModified: string;
   url: string;
+  type: string
 }
 
 export type FileState = 'uploading' | 'processing' | 'completed' | 'failed';

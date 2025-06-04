@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, type DragEvent } from 'react';
 import Link from 'next/link';
 import { Button } from "@workspace/ui/components/button";
-import { 
+import {
   ArrowLeft,
   Upload,
   AlertCircle,
@@ -21,6 +21,7 @@ import {
   FileObject,
   UploadState,
   FileState,
+  SearchBar,
 } from '@/components/minio';
 
 // Define the component using React.memo to help with re-rendering during HMR
@@ -30,7 +31,8 @@ const MinioTestPage: React.FC = React.memo(() => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  
+  const [highlightedFile, setHighlightedFile] = useState<string | null>(null);
+
   // Upload state consolidated into a single object
   const [uploadState, setUploadState] = useState<UploadState>({
     isUploading: false,
@@ -45,7 +47,7 @@ const MinioTestPage: React.FC = React.memo(() => {
     totalBytes: 0,
     totalSpeed: 0,
   });
-  
+
   // Additional state for tracking upload progress - using refs to avoid stale closures
   const speedTrackingRef = useRef<{
     fileStartTimes: Record<number, number>;
@@ -64,22 +66,41 @@ const MinioTestPage: React.FC = React.memo(() => {
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const determineFileType = (fileName: string): string => {
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
+    const videoExts = ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm'];
+    const documentExts = ['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'];
+    const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz'];
+    
+    if (imageExts.includes(ext || '')) return 'image';
+    if (videoExts.includes(ext || '')) return 'video';
+    if (documentExts.includes(ext || '')) return 'document';
+    if (archiveExts.includes(ext || '')) return 'archive';
+    
+    return 'file';
+  };
+
   const fetchFiles = useCallback(async () => {
     try {
       const response = await fetch('/api/minio/list');
       if (!response.ok) {
-        throw new Error(`Failed to fetch files: ${response.statusText}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setFiles(data.files || []);
+      
+      // Add type field to each file
+      const filesWithType = data.files.map((file: any) => ({
+        ...file,
+        type: determineFileType(file.name)
+      }));
+      
+      setFiles(filesWithType);
+      setError(null);
     } catch (err: any) {
-      console.error('Error fetching files:', err);
+      console.error('Fetch error:', err);
       setError(err.message || 'Failed to fetch files');
-      toast.error("Connection Error", {
-        description: "Failed to fetch files from MinIO server",
-        icon: <AlertCircle className="h-4 w-4" />,
-        position: "top-right",
-      });
     }
   }, []);
 
@@ -92,26 +113,26 @@ const MinioTestPage: React.FC = React.memo(() => {
     if (!confirm(`Are you sure you want to delete "${fileName}"?`)) {
       return;
     }
-    
+
     setIsDeleting(fileName);
     setError(null);
-    
+
     try {
       const response = await fetch(`/api/minio/delete?objectName=${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Delete failed');
       }
-      
+
       toast.success("File Deleted", {
         description: `${fileName} has been permanently deleted`,
         icon: <CheckCircle className="h-4 w-4" />,
         position: "top-right",
       });
-      
+
       fetchFiles();
     } catch (err: any) {
       console.error('Delete error:', err);
@@ -123,7 +144,7 @@ const MinioTestPage: React.FC = React.memo(() => {
       });
     } finally {
       setIsDeleting(null);
-      
+
     }
   }, [fetchFiles]);
 
@@ -186,6 +207,22 @@ const MinioTestPage: React.FC = React.memo(() => {
     }));
   };
 
+  const handleFileSelectSearch = (fileName: string) => {
+    // Set the highlighted file
+    setHighlightedFile(fileName);
+
+    // Clear highlight after 3 seconds
+    setTimeout(() => {
+      setHighlightedFile(null);
+    }, 3000);
+
+    toast.success("File Found", {
+      description: `Highlighted ${fileName}`,
+      icon: <CheckCircle className="h-4 w-4" />,
+      position: "top-right",
+    });
+  };
+
   const handleUpload = async () => {
     if (!selectedFiles || selectedFiles.length === 0) {
       toast.error("No Files Selected", {
@@ -221,7 +258,7 @@ const MinioTestPage: React.FC = React.memo(() => {
       totalSpeed: 0,
       transferSpeed: 0,
     }));
-    
+
     // Calculate total size for all files
     let totalSize = 0;
     for (let i = 0; i < selectedFiles.length; i++) {
@@ -230,9 +267,9 @@ const MinioTestPage: React.FC = React.memo(() => {
         totalSize += file.size;
       }
     }
-    
+
     setUploadState((prev: UploadState) => ({ ...prev, totalBytes: totalSize }));
-    
+
     toast.success("Upload Started", {
       description: `Uploading ${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} to MinIO`,
       icon: <CheckCircle className="h-4 w-4" />,
@@ -246,12 +283,12 @@ const MinioTestPage: React.FC = React.memo(() => {
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       if (!file) continue;
-      
+
       const currentFileToast = toast.loading(`Preparing upload ${i + 1} of ${totalFiles}`, {
         description: file.name,
         position: "top-right",
       });
-      
+
       uploadPromises.push(
         new Promise<void>(async (resolve) => {
           try {
@@ -265,10 +302,10 @@ const MinioTestPage: React.FC = React.memo(() => {
         })
       );
     }
-    
+
     try {
       await Promise.all(uploadPromises);
-      
+
       // Final summary toast after all uploads are attempted
       const currentState = uploadState;
       if (currentState.successfulUploads === totalFiles) {
@@ -294,11 +331,11 @@ const MinioTestPage: React.FC = React.memo(() => {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      
+
       setTimeout(() => {
         setSelectedFiles(null);
       }, 2000);
-      
+
       if (currentState.successfulUploads > 0) {
         fetchFiles();
       }
@@ -310,7 +347,7 @@ const MinioTestPage: React.FC = React.memo(() => {
         icon: <AlertCircle className="h-4 w-4" />,
         position: "top-right",
       });
-      
+
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -367,45 +404,45 @@ const MinioTestPage: React.FC = React.memo(() => {
         if (event.lengthComputable) {
           const percentComplete = Math.round((event.loaded / event.total) * 100);
           const currentTime = Date.now();
-          
+
           // Update file progress
           setUploadState((prev: UploadState) => ({
             ...prev,
             fileProgresses: { ...prev.fileProgresses, [index]: percentComplete }
           }));
-          
+
           // Calculate individual file speed using delta time
           const previousTime = speedTrackingRef.current.filePreviousTime[index];
           const previousLoaded = speedTrackingRef.current.filePreviousLoaded[index];
-          
+
           if (previousTime !== undefined && previousLoaded !== undefined) {
             const timeDelta = (currentTime - previousTime) / 1000;
             const bytesDelta = event.loaded - previousLoaded;
-            
+
             // Only update speed if we have significant time delta (avoid division by near-zero)
             if (timeDelta >= 0.5 && bytesDelta > 0) {
               const currentFileSpeed = bytesDelta / timeDelta;
-              
+
               // Update tracking for this file
               speedTrackingRef.current.filePreviousLoaded[index] = event.loaded;
               speedTrackingRef.current.filePreviousTime[index] = currentTime;
-              
+
               // Calculate global speed using total bytes uploaded across all files
               const globalTimeDelta = (currentTime - speedTrackingRef.current.globalPreviousTime) / 1000;
-              
+
               if (globalTimeDelta >= 0.1) {
                 setUploadState((prev: UploadState) => {
                   const newTotalBytesUploaded = prev.totalBytesUploaded + bytesDelta;
                   const totalElapsed = (currentTime - speedTrackingRef.current.globalStartTime) / 1000;
-                  
+
                   // Calculate average speed over entire upload duration for stability
                   const averageGlobalSpeed = totalElapsed > 0 ? newTotalBytesUploaded / totalElapsed : 0;
-                  
+
                   // For current file being actively uploaded, use more responsive calculation
-                  const updatedTransferSpeed = index === prev.activeFileIndex ? 
+                  const updatedTransferSpeed = index === prev.activeFileIndex ?
                     (prev.transferSpeed === 0 ? currentFileSpeed : (prev.transferSpeed * 0.7 + currentFileSpeed * 0.3)) :
                     prev.transferSpeed;
-                  
+
                   return {
                     ...prev,
                     uploadProgress: percentComplete,
@@ -414,13 +451,13 @@ const MinioTestPage: React.FC = React.memo(() => {
                     totalSpeed: averageGlobalSpeed,
                   };
                 });
-                
+
                 // Update global tracking
                 speedTrackingRef.current.globalPreviousTime = currentTime;
               }
             }
           }
-          
+
           // Show progress toasts at key milestones
           if (percentComplete % 25 === 0 || percentComplete === 100) {
             toast.loading(`${percentComplete}% Complete`, {
@@ -429,13 +466,13 @@ const MinioTestPage: React.FC = React.memo(() => {
               position: "top-right",
             });
           }
-          
+
           if (percentComplete === 100) {
             setUploadState((prev: UploadState) => ({
               ...prev,
               fileStates: { ...prev.fileStates, [index]: 'processing' as FileState }
             }));
-            
+
             toast.loading(`Processing`, {
               description: file.name,
               id: toastId,
@@ -444,24 +481,24 @@ const MinioTestPage: React.FC = React.memo(() => {
           }
         }
       });
-      
+
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
-            
+
             setUploadState((prev: UploadState) => ({
               ...prev,
               fileStates: { ...prev.fileStates, [index]: 'completed' as FileState }
             }));
-            
+
             toast.success(`Upload Complete`, {
               description: file.name,
               id: toastId,
               icon: <CheckCircle className="h-4 w-4" />,
               position: "top-right",
             });
-            
+
             fetchFiles();
             resolve(response);
           } catch (error) {
@@ -475,19 +512,19 @@ const MinioTestPage: React.FC = React.memo(() => {
           try {
             const errorData = JSON.parse(xhr.responseText);
             const error = new Error(errorData.error || 'Upload failed');
-            
+
             setUploadState((prev: UploadState) => ({
               ...prev,
               fileStates: { ...prev.fileStates, [index]: 'failed' as FileState }
             }));
-            
+
             toast.error(`Upload Failed`, {
               description: file.name,
               id: toastId,
               icon: <AlertCircle className="h-4 w-4" />,
               position: "top-right",
             });
-            
+
             reject(error);
           } catch (error) {
             setUploadState((prev: UploadState) => ({
@@ -498,23 +535,23 @@ const MinioTestPage: React.FC = React.memo(() => {
           }
         }
       };
-      
+
       xhr.onerror = () => {
         setUploadState((prev: UploadState) => ({
           ...prev,
           fileStates: { ...prev.fileStates, [index]: 'failed' as FileState }
         }));
-        
+
         toast.error(`Connection Error`, {
           description: file.name,
           id: toastId,
           icon: <AlertCircle className="h-4 w-4" />,
           position: "top-right",
         });
-        
+
         reject(new Error('Network error occurred'));
       };
-      
+
       xhr.open('POST', '/api/minio/upload');
       xhr.send(formData);
     });
@@ -540,9 +577,9 @@ const MinioTestPage: React.FC = React.memo(() => {
             </Link>
           </div>
           <h1 className="text-4xl font-bold mb-2" style={{ color: "oklch(0.985 0 0)" }}>
-            MinIO Test
+            Test
           </h1>
-          <p className="text-muted-foreground">Test MinIO file storage and management</p>
+          <p className="text-muted-foreground">Test file storage and management</p>
         </div>
 
         <div className="space-y-6">
@@ -601,13 +638,20 @@ const MinioTestPage: React.FC = React.memo(() => {
             }}
           >
             <div className="p-6">
-              <h2 className="text-xl font-semibold" style={{ color: "oklch(0.985 0 0)" }}>Uploaded Files</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold" style={{ color: "oklch(0.985 0 0)" }}>Uploaded Files</h2>
+                <SearchBar
+                  files={files}
+                  onFileSelect={handleFileSelectSearch}
+                />
+              </div>
             </div>
             <div className="px-6 pb-6">
               <FilesTable
                 files={files}
                 isDeleting={isDeleting}
                 onDeleteFile={handleDeleteFile}
+                highlightedFile={highlightedFile}
               />
             </div>
           </div>
