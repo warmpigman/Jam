@@ -1,0 +1,10 @@
+node_modules
+dist
+.next
+*.log
+.env
+*.test.*
+coverage
+.git
+.yarn/cache
+storage

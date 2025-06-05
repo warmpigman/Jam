@@ -24,7 +24,7 @@ services:
       - "3000:3000"
     volumes:
       - ./:/app/:delegated
-      - /app/node_modules
+#      - /app/node_modules
       - /app/storage
     # Add proper DNS resolution with extra_hosts
     extra_hosts:
@@ -79,9 +79,10 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - ./apps/ingestion-service/src:/app/apps/ingestion-service/src
-      - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
-      - ./apps/ingestion-service/tsconfig.json:/app/apps/ingestion-service/tsconfig.json
+      - /app/node_modules
+    #   # - ./apps/ingestion-service/src:/app/src
+      # - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
+      # - ./apps/ingestion-service/tsconfig.json:/app/apps/ingestion-service/tsconfig.json
       # - ./apps/ingestion-service/nodemon.json:/app/apps/ingestion-service/nodemon.json
     depends_on:
       - minio
@@ -139,8 +140,8 @@ services:
   #creates buckets in minio so they are available when the app starts
   minio-init:
     build:
-      context: .
-      dockerfile: docker/minio-init/Dockerfile
+      context: ./docker/minio-init
+      dockerfile: Dockerfile
     depends_on:
       - minio
       - ingestion-service
@@ -222,10 +223,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    volumes:
-      - ./docker/embed:/app:delegated
+    # volumes:
+      # - ./docker/embed:/app:delegated
       # Persistent cache volumes
-      # - hf_cache:/app/hf_cache
+      # - ./storage/hf_cache:/app/hf_cache
       # - pip_cache:/app/pip_cache
     environment:
       - FLASK_ENV=development

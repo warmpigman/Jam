@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.10
 
 # Set working directory
 WORKDIR /app
@@ -19,10 +19,13 @@ ENV PIP_CACHE_DIR=/app/pip_cache
 # Copy requirements first for better layer caching
 COPY requirements.txt .
 
+# Build on low memory machines
+RUN --mount=type=cache,target=/app/pip_cache \
+    pip install --cache-dir /app/pip_cache torch==2.7.0
 # Install Python dependencies with pip cache
 RUN --mount=type=cache,target=/app/pip_cache \
     pip install --cache-dir /app/pip_cache -r requirements.txt
-
+# RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 

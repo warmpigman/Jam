@@ -1,29 +1,31 @@
-FROM node:20-alpine
+FROM node:20-alpine AS base
 
-# Set working directory
+FROM base AS builder
+RUN apk update
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
+RUN yarn global add turbo@2
+COPY . .
 
-# Install yarn globally
-# RUN npm install -g yarn
+RUN turbo prune ingestion-service --docker
 
-# Copy root package files
-COPY package.json yarn.lock turbo.json ./
-
-# Copy workspace package files
-COPY packages/ ./packages/
-COPY apps/ingestion-service/package.json ./apps/ingestion-service/
-
-# Install dependencies
+FROM base AS installer
+RUN apk update
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+ 
+COPY --from=builder /app/out/json/ .
 RUN yarn install --frozen-lockfile
 
-# Copy source code
-COPY apps/ingestion-service/ ./apps/ingestion-service/
+COPY --from=builder /app/out/full/ .
+RUN yarn turbo run build
+ 
+FROM base AS runner
+WORKDIR /app
 
-# Set working directory to the app
-WORKDIR /app/apps/ingestion-service
-
-# Expose port
-EXPOSE 3001
-
-# Start the development server with hot reload
-CMD ["yarn", "dev"]
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+USER nextjs
+ 
+COPY --from=installer /app .
+CMD ["sh", "-c", "cd apps/ingestion-service && yarn start"]
