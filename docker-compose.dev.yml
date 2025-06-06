@@ -1,0 +1,288 @@
+version: "3.8"
+
+# Create a custom network with DNS configuration
+networks:
+  jam_network:
+    driver: bridge
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT=${NEXT_PUBLIC_PUBLIC_MINIO_ENDPOINT}
+      - NEXT_PUBLIC_PUBLIC_MINIO_PORT=80
+      - NEXT_PUBLIC_PUBLIC_MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - PUBLIC_DOMAIN=${PUBLIC_DOMAIN}
+      - PUBLIC_S3_DOMAIN=${PUBLIC_S3_DOMAIN}
+      - NODE_ENV=development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app:delegated
+      - /app/node_modules
+      - /app/.next
+    # Add proper DNS resolution with extra_hosts
+    extra_hosts:
+      - "${PUBLIC_S3_DOMAIN}:172.17.0.1"
+      - "${PUBLIC_DOMAIN}:172.17.0.1"
+    depends_on:
+      - minio
+      - minio-init
+    restart: unless-stopped
+    networks:
+      - jam_network
+
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: apps/ingestion-service/Dockerfile.dev
+    tty: true
+    stdin_open: true
+    environment:
+      # MinIO Configuration
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_INGESTION_BUCKET=documents
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # MongoDB Configuration
+      - MONGODB_URI=mongodb://mongo:27017/jam_ingestion
+      - MONGODB_DATABASE=jam_ingestion
+      # LanceDB Configuration  
+      - LANCEDB_URI=s3://embeddings/
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_REGION=us-east-1
+      # Ollama Configuration
+      - OLLAMA_HOST=172.16.0.170
+      - OLLAMA_PORT=11434
+      - OLLAMA_TEXT_MODEL=nomic-embed-text
+      - OLLAMA_IMAGE_MODEL=nomic-embed-vision
+      # Service Configuration
+      - NODE_ENV=development
+      - PORT=3001
+      # - DEBUG=*
+      # - LOG_LEVEL=debug
+    ports:
+      - "3001:3001"
+    volumes:
+      - /app/node_modules
+    #   # - ./apps/ingestion-service/src:/app/src
+      # - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
+      # - ./apps/ingestion-service/tsconfig.json:/app/apps/ingestion-service/tsconfig.json
+      # - ./apps/ingestion-service/nodemon.json:/app/apps/ingestion-service/nodemon.json
+    depends_on:
+      - minio
+      - redis
+      - mongo
+    restart: unless-stopped
+    networks:
+      - jam_network
+  
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - web
+      - ingestion-service
+      - minio
+    restart: unless-stopped
+    networks:
+      - jam_network
+    # Define proper hostnames for the nginx container
+    hostname: nginx
+    extra_hosts:
+      - "${PUBLIC_S3_DOMAIN}:127.0.0.1"
+      - "${PUBLIC_DOMAIN}:127.0.0.1"
+  
+  minio:
+    image: minio/minio
+    ports:
+      - "9090:9000"  # Only for direct access if needed
+      - "9091:9001"  # Only for direct access if needed
+    volumes:
+      - ./storage/minio:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_OPTS="--console-address :9001"
+      # Tell MinIO that it's accessible via it's domain
+      - MINIO_SERVER_URL=${MINIO_URL}
+      # Add custom domain for browser redirect
+      # - MINIO_BROWSER_REDIRECT_URL=http://console.s3.jam.local
+      # Configure webhook for ingestion service using environment variables
+      # - MINIO_NOTIFY_WEBHOOK_ENABLE_INGESTION=on
+      # - MINIO_NOTIFY_WEBHOOK_ENDPOINT_INGESTION=http://ingestion-service:3001/webhook/minio
+      # - MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_INGESTION=${MINIO_WEBHOOK_TOKEN}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    networks:
+      - jam_network
+    hostname: minio
+  
+  #creates buckets in minio so they are available when the app starts
+  minio-init:
+    build:
+      context: ./docker/minio-init
+      dockerfile: Dockerfile
+    depends_on:
+      - minio
+      - ingestion-service
+    entrypoint: >
+      bash -c "
+        # wait until MinIO API is responsive
+        until mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+        do echo 'Waiting for MinIO…' && sleep 2;
+        done;
+        
+        # wait until ingestion service is responsive using curl
+        until curl -f http://ingestion-service:3001/health;
+        do echo 'Waiting for ingestion service…' && sleep 2;
+        done;
+        
+        # create your buckets if they don't already exist
+        mc mb local/documents   || true;
+        mc mb local/avatars     || true;
+        mc mb local/notes-media || true;
+        mc mb local/thumbnails  || true;
+        mc mb local/temp        || true;
+        mc mb local/embeddings  || true;
+        
+        echo 'Buckets created, checking webhook configuration...';
+        
+        # Remove any existing event notifications to avoid conflicts
+        mc event remove local/documents --force || true;
+        
+        echo 'Setting up bucket notifications...';
+        
+        # Enable bucket notifications for ingestion service
+        echo "${MINIO_WEBHOOK_TOKEN}"
+        mc admin config set local notify_webhook:1 endpoint="http://ingestion-service:3001/webhook/minio" auth_token="${MINIO_WEBHOOK_TOKEN}"
+        # Restart the MinIO service to apply the new configuration
+        mc admin service restart local;
+        echo 'Configuring bucket notifications for documents bucket...';
+        # The webhook endpoint is configured via environment variables
+        mc event add local/documents arn:minio:sqs::1:webhook --event put,delete 
+        #--suffix .pdf,.docx,.txt,.png,.jpg,.jpeg,.mp3,.mp4,.mov,.avi;
+
+        echo 'Bucket notifications configured successfully!';
+        echo 'Upload files to the documents bucket to trigger the ingestion service.';
+      "
+    # ensure it only runs once
+    restart: "no"
+    networks:
+      - jam_network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass "${REDIS_PASSWORD}"}
+    volumes:
+      - ./storage/redis:/data
+    restart: unless-stopped
+    networks:
+      - jam_network
+    hostname: redis
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-changeme}
+      - MONGO_INITDB_DATABASE=jam_ingestion
+    volumes:
+      - ./storage/mongo/data:/data/db
+      - ./storage/mongo/config:/data/configdb
+    restart: unless-stopped
+    networks:
+      - jam_network
+    hostname: mongo
+  embed-service:
+    build:
+      context: ./docker/embed
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    # volumes:
+      # - ./docker/embed:/app:delegated
+      # Persistent cache volumes
+      # - ./storage/hf_cache:/app/hf_cache
+      # - pip_cache:/app/pip_cache
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/hf_cache
+      - TRANSFORMERS_CACHE=/app/hf_cache
+      - PIP_CACHE_DIR=/app/pip_cache
+    restart: unless-stopped
+    networks:
+      - jam_network
+    # For GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./storage/qdrant:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - jam_network
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   networks:
+  #     - jam_network
+  #   hostname: ollama
+  #   # Pull required models on startup
+  #   entrypoint: >
+  #     sh -c "
+  #       ollama serve &
+  #       sleep 5;
+  #       ollama pull nomic-embed-text;
+  #       ollama pull nomic-embed-vision;
+  #       wait;
+  #     "
+
+# volumes:
+  # postgres_data:
+  # qdrant_data:
+  # neo4j_data:
+  # caldav_data:
+# volumes:
+#   redis_data:
+#   mongo_data:
+#   mongo_config:
+#   ollama_data:
