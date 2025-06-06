@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import FormData from 'form-data';
+import fetch from 'node-fetch';
 import { minioClient } from './lib/minio.js';
 
 // Load environment variables
@@ -79,6 +81,60 @@ app.post('/webhook/minio', verifyWebhookToken, async (req, res) => {
   }
 });
 
+// Function to send file to embed service
+async function sendToEmbedService(fileBuffer: Buffer, fileName: string, contentType: string) {
+  try {
+    const embedServiceUrl = process.env.EMBED_SERVICE_URL || 'http://localhost:8080/embed';
+    
+    const formData = new FormData();
+    formData.append('file', fileBuffer, {
+      filename: fileName,
+      contentType: contentType
+    });
+    
+    console.log(`📤 Sending ${fileName} to embed service...`);
+    
+    const response = await fetch(embedServiceUrl, {
+      method: 'POST',
+      body: formData,
+      headers: formData.getHeaders()
+    });
+    
+    const result = await response.json();
+    
+    if (response.ok) {
+      console.log(`✅ Successfully embedded ${fileName}:`, {
+        vector_id: result.vector_id,
+        mongo_ref: result.mongo_ref
+      });
+      return result;
+    } else {
+      console.error(`❌ Embed service error for ${fileName}:`, result);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Error sending ${fileName} to embed service:`, error);
+    return null;
+  }
+}
+
+// Function to check if file should be embedded
+function shouldEmbed(contentType: string, fileName: string): boolean {
+  const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
+  const supportedTextTypes = ['text/plain'];
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'];
+  const textExtensions = ['.txt'];
+  
+  const lowerFileName = fileName.toLowerCase();
+  
+  return (
+    supportedImageTypes.includes(contentType) ||
+    supportedTextTypes.includes(contentType) ||
+    imageExtensions.some(ext => lowerFileName.endsWith(ext)) ||
+    textExtensions.some(ext => lowerFileName.endsWith(ext))
+  );
+}
+
 // Function to process uploaded files
 async function processUploadedFile(bucketName: string, objectKey: string) {
   try {
@@ -105,8 +161,23 @@ async function processUploadedFile(bucketName: string, objectKey: string) {
     
     console.log(`📥 Downloaded file: ${objectKey} (${fileBuffer.length} bytes)`);
     
-    // For text files, log the content
+    // Check if file should be embedded
     const contentType = stat.metaData?.['content-type'] || '';
+    if (shouldEmbed(contentType, objectKey)) {
+      console.log(`🎯 File ${objectKey} is embeddable, sending to embed service...`);
+      const embedResult = await sendToEmbedService(fileBuffer, objectKey, contentType);
+      
+      if (embedResult) {
+        console.log(`🔗 Embed service response for ${objectKey}:`, {
+          vector_id: embedResult.vector_id,
+          mongo_ref: embedResult.mongo_ref
+        });
+      }
+    } else {
+      console.log(`⏭️ File ${objectKey} (${contentType}) is not supported for embedding, skipping...`);
+    }
+    
+    // For text files, log the content
     if (contentType.includes('text') || objectKey.endsWith('.txt')) {
       const textContent = fileBuffer.toString('utf-8');
       console.log(`📄 Text content of ${objectKey}:`);

@@ -80,6 +80,7 @@ services:
     ports:
       - "3001:3001"
     volumes:
+      - ./:/app:delegated
       - /app/node_modules
     #   # - ./apps/ingestion-service/src:/app/src
       # - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
