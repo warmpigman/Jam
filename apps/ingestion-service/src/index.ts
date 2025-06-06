@@ -84,7 +84,7 @@ app.post('/webhook/minio', verifyWebhookToken, async (req, res) => {
 // Function to send file to embed service
 async function sendToEmbedService(fileBuffer: Buffer, fileName: string, contentType: string) {
   try {
-    const embedServiceUrl = process.env.EMBED_SERVICE_URL || 'http://localhost:8080/embed';
+    const embedServiceUrl = process.env.EMBED_SERVICE_URL || 'http://embed-service:8080/embed';
     
     const formData = new FormData();
     formData.append('file', fileBuffer, {
@@ -103,10 +103,7 @@ async function sendToEmbedService(fileBuffer: Buffer, fileName: string, contentT
     const result = await response.json();
     
     if (response.ok) {
-      console.log(`✅ Successfully embedded ${fileName}:`, {
-        vector_id: result.vector_id,
-        mongo_ref: result.mongo_ref
-      });
+      console.log(`✅ Successfully embedded ${fileName}:`, result);
       return result;
     } else {
       console.error(`❌ Embed service error for ${fileName}:`, result);
