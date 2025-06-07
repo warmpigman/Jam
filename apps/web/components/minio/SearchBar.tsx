@@ -29,23 +29,14 @@ function getFileIcon(type: string) {
 
 // Helper function to infer file type from filename and content type
 function inferFileType(filename: string, contentType?: string): string {
-  const name = filename.toLowerCase()
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
   
-  // Check content type first
-  if (contentType) {
-    if (contentType.startsWith('image/')) return 'image'
-    if (contentType.startsWith('video/')) return 'video'
-    if (contentType.startsWith('text/') || contentType === 'application/json') return 'document'
-    if (contentType.includes('zip') || contentType.includes('archive')) return 'archive'
-  }
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'].includes(extension)) return 'video';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(extension)) return 'image';
+  if (['pdf', 'doc', 'docx', 'txt', 'rtf', 'md'].includes(extension)) return 'document';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(extension)) return 'archive';
   
-  // Fallback to file extension
-  if (name.match(/\.(jpg|jpeg|png|gif|bmp|webp|svg)$/)) return 'image'
-  if (name.match(/\.(mp4|avi|mov|wmv|flv|webm|mkv)$/)) return 'video'
-  if (name.match(/\.(txt|md|json|xml|csv|log|js|ts|html|css|py|java|cpp|c|h)$/)) return 'document'
-  if (name.match(/\.(zip|rar|7z|tar|gz|bz2)$/)) return 'archive'
-  
-  return 'document' // Default fallback
+  return 'file';
 }
 
 interface SearchResult extends FileObject {
@@ -68,6 +59,7 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
   const [semanticResults, setSemanticResults] = useState<SearchResult[]>([])
   const [searchMode, setSearchMode] = useState<'filename' | 'semantic'>('filename')
   const [showSemanticResults, setShowSemanticResults] = useState(false)
+  const [isFading, setIsFading] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const semanticSearchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -109,26 +101,26 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
       const data = await response.json()
       
       // Enrich semantic results with actual file metadata from MinIO
-      const enrichedResults = (data.results || []).map((result: any) => {
-        // Find the corresponding file in the MinIO files list
-        const minioFile = files.find(f => f.name === result.name || f.name === result.filename)
+      const enrichedResults = data.results?.map((result: any) => {
+        const filename = result.filename || result.name || 'Unknown'
+        const matchingFile = files.find(f => f.name === filename)
         
-        if (minioFile) {
-          // Use MinIO file data with semantic search enhancements
+        if (matchingFile) {
           return {
-            ...minioFile,
+            ...matchingFile,
             similarity: result.similarity || result.score || 0,
             similarity_score: result.similarity_score || result.score || 0,
             preview: result.preview,
             vector_id: result.vector_id,
             mongo_ref: result.mongo_ref,
+            content_type: result.content_type,
           }
         } else {
-          // Fallback: use semantic result data and infer file type
-          const inferredType = inferFileType(result.filename || result.name, result.content_type)
+          const inferredType = inferFileType(filename, result.content_type)
           return {
-            name: result.filename || result.name || 'Unknown',
-            size: 0, // Unknown size
+            name: filename,
+            size: result.size || 0,
+            url: result.url || '#',
             lastModified: new Date().toISOString(), // Unknown date
             type: inferredType,
             similarity: result.similarity || result.score || 0,
@@ -210,17 +202,31 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
   }
 
   const toggleSearchMode = () => {
-    const newMode = searchMode === 'filename' ? 'semantic' : 'filename'
-    setSearchMode(newMode)
-    setSemanticResults([])
-    setShowSemanticResults(false)
-    setSelectedSuggestionIndex(-1)
+    setIsFading(true)
     
-    toast.success("Search Mode Changed", {
-      description: `Switched to ${newMode === 'semantic' ? 'AI semantic' : 'filename'} search`,
-      icon: newMode === 'semantic' ? <Sparkles className="h-4 w-4" /> : <Search className="h-4 w-4" />,
-      position: "top-right",
-    })
+    // Start fade out
+    setTimeout(() => {
+      const newMode = searchMode === 'filename' ? 'semantic' : 'filename'
+      setSearchMode(newMode)
+      setSemanticResults([])
+      setShowSemanticResults(false)
+      setSelectedSuggestionIndex(-1)
+      // Don't clear search query - preserve it when switching modes
+      
+      toast.success(`${newMode === 'semantic' ? 'Semantic' : 'Regular'} Search Enabled`, {
+        description: newMode === 'semantic'
+          ? "AI-powered semantic search is now active"
+          : "Switched back to regular keyword search",
+        icon: newMode === 'semantic' ? <Sparkles className="h-4 w-4" /> : <Search className="h-4 w-4" />,
+        position: "top-right",
+      })
+
+      // End fade out, start fade in
+      setTimeout(() => {
+        setIsFading(false)
+        searchInputRef.current?.focus()
+      }, 50)
+    }, 150)
   }
 
   const getCurrentSuggestions = () => {
@@ -270,70 +276,106 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
     <div className="relative w-full max-w-md">
       {/* Search Input with Mode Toggle */}
       <div className="relative">
-        <div className="flex">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              type="text"
-              placeholder={searchMode === 'semantic' ? "Search by content meaning..." : "Search files..."}
-              value={searchQuery}
-              onChange={handleSearchChange}
-              onFocus={() => setIsSearchFocused(true)}
-              onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
-              onKeyDown={handleKeyDown}
-              className={cn(
-                "pl-10 pr-10 transition-all duration-200 rounded-r-none border-r-0",
-                isSearchFocused && "ring-2 ring-primary/20 border-primary/50",
+        <div
+          className={cn(
+            "absolute left-3 top-1/2 transform -translate-y-1/2 flex items-center gap-1 transition-all duration-300 ease-in-out",
+            isFading && "opacity-50",
+          )}
+        >
+          {searchMode === 'semantic' ? (
+            <div className="flex items-center gap-1">
+              <Sparkles className="h-4 w-4 text-primary animate-pulse" />
+              {isSemanticSearching && (
+                <div className="flex gap-0.5">
+                  <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
               )}
-              style={{
-                backgroundColor: "oklch(0.274 0.006 286.033)",
-                borderColor: isSearchFocused ? "oklch(0.92 0.004 286.32)" : "oklch(1 0 0 / 10%)",
-                color: "oklch(0.985 0 0)",
-              }}
-            />
-            {searchQuery && (
-              <button
-                onClick={clearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          
-          {/* Search Mode Toggle Button */}
+            </div>
+          ) : (
+            <Search className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+
+        <Input
+          ref={searchInputRef}
+          type="text"
+          placeholder={searchMode === 'semantic' ? "Ask AI to find files..." : "Search files..."}
+          value={searchQuery}
+          onChange={handleSearchChange}
+          onFocus={() => setIsSearchFocused(true)}
+          onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+          onKeyDown={handleKeyDown}
+          className={cn(
+            "pl-12 pr-28 transition-all duration-300 ease-in-out",
+            isSearchFocused && "ring-2 ring-primary/20 border-primary/50",
+            searchMode === 'semantic' && "bg-gradient-to-r from-primary/5 to-transparent border-primary/30",
+            isFading && "opacity-50 scale-[0.98]",
+          )}
+          style={{
+            backgroundColor: searchMode === 'semantic' ? "oklch(0.274 0.006 286.033)" : "oklch(0.274 0.006 286.033)",
+            borderColor: isSearchFocused
+              ? "oklch(0.92 0.004 286.32)"
+              : searchMode === 'semantic'
+                ? "oklch(0.92 0.004 286.32 / 30%)"
+                : "oklch(1 0 0 / 10%)",
+            color: "oklch(0.985 0 0)",
+            transition: "all 0.3s ease-in-out",
+          }}
+        />
+
+        {/* AI Toggle Button - More Prominent */}
+        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+          {searchQuery && (
+            <button onClick={clearSearch} className="text-muted-foreground hover:text-foreground transition-colors p-1">
+              <X className="h-3 w-3" />
+            </button>
+          )}
+
+          {/* More Button-like AI Toggle */}
           <Button
-            type="button"
-            variant="outline"
+            variant={searchMode === 'semantic' ? "default" : "outline"}
             size="sm"
             onClick={toggleSearchMode}
             className={cn(
-              "rounded-l-none border-l-0 px-3 h-10 transition-all duration-200",
-              searchMode === 'semantic' && "bg-primary/10 border-primary/50"
+              "h-7 px-3 text-xs font-medium transition-all duration-300 ease-in-out relative overflow-hidden border",
+              searchMode === 'semantic'
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 border-primary shadow-sm"
+                : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground border-border hover:border-primary/50",
+              isFading && "opacity-75 scale-95",
             )}
-            style={{
-              backgroundColor: searchMode === 'semantic' ? "oklch(0.4 0.1 260)" : "oklch(0.274 0.006 286.033)",
-              borderColor: isSearchFocused ? "oklch(0.92 0.004 286.32)" : "oklch(1 0 0 / 10%)",
-            }}
-            title={`Switch to ${searchMode === 'semantic' ? 'filename' : 'semantic'} search`}
           >
-            {isSemanticSearching ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : searchMode === 'semantic' ? (
-              <Sparkles className="h-4 w-4" />
-            ) : (
-              <Search className="h-4 w-4" />
+            {searchMode === 'semantic' && (
+              <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent animate-pulse" />
             )}
+            <div className="relative flex items-center gap-1.5">
+              {searchMode === 'semantic' ? (
+                <>
+                  <Sparkles className="h-3 w-3" />
+                  <span>AI Search</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3 w-3" />
+                  <span>Try AI</span>
+                </>
+              )}
+            </div>
           </Button>
         </div>
       </div>
 
       {/* Search Mode Indicator */}
       {searchMode === 'semantic' && (
-        <div className="mt-1 text-xs text-muted-foreground flex items-center gap-1">
-          <Sparkles className="h-3 w-3" />
-          AI semantic search {searchQuery.length < 3 && "(type 3+ characters)"}
+        <div
+          className={cn(
+            "absolute -bottom-6 left-0 flex items-center gap-1 text-xs text-primary/70 transition-all duration-300 ease-in-out",
+            isFading ? "opacity-0 translate-y-1" : "opacity-100 translate-y-0",
+          )}
+        >
+          <Sparkles className="h-3 w-3 animate-pulse" />
+          <span>Semantic search active</span>
         </div>
       )}
 
@@ -341,13 +383,35 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
       {(showSuggestions || showSemanticResults) && (
         <div
           ref={suggestionsRef}
-          className="absolute top-full left-0 right-0 mt-2 rounded-lg border shadow-lg z-50 max-h-80 overflow-hidden animate-in slide-in-from-top-2 duration-200"
+          className={cn(
+            "absolute top-full left-0 right-0 mt-2 rounded-lg border shadow-lg z-50 animate-in slide-in-from-top-2 duration-200",
+            searchMode === 'semantic' && "border-primary/20 shadow-primary/10",
+          )}
           style={{
             backgroundColor: "oklch(0.21 0.006 285.885)",
-            borderColor: "oklch(1 0 0 / 10%)",
+            borderColor: searchMode === 'semantic' ? "oklch(0.92 0.004 286.32 / 20%)" : "oklch(1 0 0 / 10%)",
+            maxHeight: "320px", // Set explicit max height
+            overflow: "hidden", // Hide overflow on container
           }}
         >
-          <div className="max-h-80 overflow-y-auto">
+          {/* AI Search Header */}
+          {searchMode === 'semantic' && searchQuery.length > 0 && (
+            <div className="p-3 border-b border-primary/10 bg-gradient-to-r from-primary/5 to-transparent flex-shrink-0">
+              <div className="flex items-center gap-2 text-xs">
+                <Sparkles className="h-3 w-3 text-primary animate-pulse" />
+                <span className="text-primary font-medium">AI-Powered Results</span>
+                {isSemanticSearching && (
+                  <div className="flex gap-0.5 ml-2">
+                    <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="overflow-y-auto" style={{ maxHeight: searchMode === 'semantic' && searchQuery.length > 0 ? "260px" : "320px" }}>
             {/* Recent Searches */}
             {searchQuery.length === 0 && recentSearches.length > 0 && (
               <div className="p-2">
@@ -385,20 +449,29 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
                         key={file.vector_id || file.name}
                         onClick={() => handleSuggestionClick(file)}
                         className={cn(
-                          "w-full text-left px-3 py-3 rounded transition-all duration-150 group",
+                          "w-full text-left px-3 py-3 rounded transition-all duration-150 group relative",
                           selectedSuggestionIndex === index
-                            ? "bg-primary/10 border-l-2 border-primary"
+                            ? "bg-primary/15 border-l-2 border-primary shadow-sm"
                             : "hover:bg-muted/30",
                         )}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="flex-shrink-0">{getFileIcon(file.type)}</div>
+                        {selectedSuggestionIndex === index && (
+                          <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent rounded" />
+                        )}
+                        <div className="flex items-center gap-3 relative">
+                          <div className="flex-shrink-0 flex items-center gap-1">
+                            {getFileIcon(file.type)}
+                            <Sparkles className="h-2 w-2 text-primary/60" />
+                          </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-medium truncate" style={{ color: "oklch(0.985 0 0)" }}>
                                 {file.name}
                               </span>
-                              <Badge variant="secondary" className="text-xs bg-muted/50">
+                              <Badge
+                                variant="secondary"
+                                className="text-xs bg-primary/20 text-primary"
+                              >
                                 {file.type}
                               </Badge>
                               {file.similarity && (
@@ -416,6 +489,11 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
                               <span>{formatFileSize(file.size)}</span>
                               <span>•</span>
                               <span>{file.lastModified}</span>
+                              <span>•</span>
+                              <span className="text-primary/70 flex items-center gap-1">
+                                <Sparkles className="h-2 w-2" />
+                                AI Match
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -424,8 +502,13 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
                   </>
                 ) : (
                   <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-                    <Sparkles className="h-4 w-4 mx-auto mb-2 opacity-50" />
-                    No semantic matches found for "{searchQuery}"
+                    <div className="flex flex-col items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-primary/50" />
+                      <span>AI couldn't find files matching "{searchQuery}"</span>
+                      <span className="text-xs text-muted-foreground/70">
+                        Try describing what you're looking for differently
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
