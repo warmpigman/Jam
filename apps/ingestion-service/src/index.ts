@@ -174,13 +174,43 @@ async function processUploadedFile(bucketName: string, objectKey: string) {
       console.log(`⏭️ File ${objectKey} (${contentType}) is not supported for embedding, skipping...`);
     }
     
-    // For text files, log the content
+    // For text files, log the content with proper encoding detection
     if (contentType.includes('text') || objectKey.endsWith('.txt')) {
-      const textContent = fileBuffer.toString('utf-8');
-      console.log(`📄 Text content of ${objectKey}:`);
-      console.log('---START---');
-      console.log(textContent);
-      console.log('---END---');
+      try {
+        // Try multiple encodings like the embed service does
+        let textContent: string;
+        let encoding = 'utf-8';
+        
+        // First try UTF-8
+        try {
+          textContent = fileBuffer.toString('utf-8');
+          // Check if the text contains replacement characters (indicating encoding issues)
+          if (textContent.includes('�')) {
+            throw new Error('UTF-8 decoding produced replacement characters');
+          }
+        } catch {
+          // Try UTF-16 LE (common for Windows text files)
+          try {
+            textContent = fileBuffer.toString('utf16le');
+            encoding = 'utf-16le';
+          } catch {
+            // Try Latin-1 as fallback
+            textContent = fileBuffer.toString('latin1');
+            encoding = 'latin1';
+          }
+        }
+        
+        if (encoding !== 'utf-8') {
+          console.log(`📝 Text file ${objectKey} decoded using ${encoding} encoding`);
+        }
+        
+        console.log(`📄 Text content of ${objectKey}:`);
+        console.log('---START---');
+        console.log(textContent);
+        console.log('---END---');
+      } catch (error) {
+        console.error(`❌ Could not decode text content of ${objectKey}:`, error);
+      }
     } else {
       console.log(`📁 Binary file processed: ${objectKey} (${contentType})`);
     }

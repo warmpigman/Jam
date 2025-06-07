@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import PointStruct, VectorParams, Distance
 import uuid
-
+print("Starting embedding service...")
 TEXT_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 VISION_MODEL = "nomic-ai/nomic-embed-vision-v1.5"
 CACHE_DIR = "./hf_cache"
@@ -122,9 +122,25 @@ def embed():
         # Handle text files
         elif content_type in allowed_text_types or filename.endswith(text_exts):
             try:
-                text = file.read().decode("utf-8")
+                # Try to read as UTF-8 first
+                raw_data = file.read()
+                try:
+                    text = raw_data.decode("utf-8")
+                except UnicodeDecodeError:
+                  # If UTF-8 fails, try other common encodings
+                    file.seek(0)  # Reset file pointer
+                    try:
+                       text = file.read().decode("utf-16")
+                       print(f"Warning: File {file.filename} decoded using utf-16 instead of utf-8")
+                    except UnicodeDecodeError:
+                      # If all text decodings fail, treat as binary and skip
+                       return jsonify({"error": f"File {file.filename} appears to be binary data, not text. Cannot process as text file."}), 400
             except Exception as e:
-                return jsonify({"error": f"Failed to read text file: {str(e)}"}), 400
+                return jsonify({"error": f"Failed to read text! file: {str(e)}"}), 400
+
+            # Validate that we have actual text content
+            if not text.strip():
+                return jsonify({"error": f"File {file.filename} appears to be empty or contains no readable text"}), 400
 
             tokenizer = preloaded["text_tokenizer"]
             model = preloaded["text_model"]
@@ -218,10 +234,13 @@ def search():
     results = []
     for hit in hits:
         results.append({
-            "id": hit.id,
-            "score": hit.score,
+            "vector_id": hit.id,
+            "score": hit.score,  # Add the missing score field
             "type": hit.payload.get("type"),
-            "mongo_ref": hit.payload.get("mongo_ref")
+            "mongo_ref": hit.payload.get("mongo_ref"),
+            "filename": hit.payload.get("filename"),
+            "content_type": hit.payload.get("content_type"),
+            "preview": hit.payload.get("preview")
         })
 
     return jsonify(results)

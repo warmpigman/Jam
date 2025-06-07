@@ -225,8 +225,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    # volumes:
-      # - ./docker/embed:/app:delegated
+    volumes:
+      - ./docker/embed:/app:delegated
       # Persistent cache volumes
       # - ./storage/hf_cache:/app/hf_cache
       # - pip_cache:/app/pip_cache
