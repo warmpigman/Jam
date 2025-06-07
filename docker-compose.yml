@@ -20,12 +20,13 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
       - PUBLIC_DOMAIN=${PUBLIC_DOMAIN}
       - PUBLIC_S3_DOMAIN=${PUBLIC_S3_DOMAIN}
+      - NODE_ENV=development
     ports:
       - "3000:3000"
     volumes:
-      - ./:/app/:delegated
-#      - /app/node_modules
-      - /app/storage
+      - ./:/app:delegated
+      - /app/node_modules
+      - /app/.next
     # Add proper DNS resolution with extra_hosts
     extra_hosts:
       - "${PUBLIC_S3_DOMAIN}:172.17.0.1"
@@ -79,6 +80,7 @@ services:
     ports:
       - "3001:3001"
     volumes:
+      - ./:/app:delegated
       - /app/node_modules
     #   # - ./apps/ingestion-service/src:/app/src
       # - ./apps/ingestion-service/package.json:/app/apps/ingestion-service/package.json
@@ -223,8 +225,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
-    # volumes:
-      # - ./docker/embed:/app:delegated
+    volumes:
+      - ./docker/embed:/app:delegated
       # Persistent cache volumes
       # - ./storage/hf_cache:/app/hf_cache
       # - pip_cache:/app/pip_cache
@@ -255,13 +257,45 @@ services:
     restart: unless-stopped
     networks:
       - jam_network
-  #temporary for shipping for neighborhood
+  
+      #temporary for shipping for neighborhood
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
     restart: unless-stopped
     networks:
       - jam_network
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   restart: unless-stopped
+  #   networks:
+  #     - jam_network
+  #   hostname: ollama
+  #   # Pull required models on startup
+  #   entrypoint: >
+  #     sh -c "
+  #       ollama serve &
+  #       sleep 5;
+  #       ollama pull nomic-embed-text;
+  #       ollama pull nomic-embed-vision;
+  #       wait;
+  #     "
+
+# volumes:
+  # postgres_data:
+  # qdrant_data:
+  # neo4j_data:
+  # caldav_data:
+# volumes:
+#   redis_data:
+#   mongo_data:
+#   mongo_config:
+#   ollama_data:
+
 
   # ollama:
   #   image: ollama/ollama:latest
