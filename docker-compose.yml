@@ -147,6 +147,8 @@ services:
     depends_on:
       - minio
       - ingestion-service
+    volumes:
+      - ./docker/minio-init/policies:/policies
     entrypoint: >
       bash -c "
         # wait until MinIO API is responsive
@@ -158,6 +160,19 @@ services:
         until curl -f http://ingestion-service:3001/health;
         do echo 'Waiting for ingestion service…' && sleep 2;
         done;
+        
+        # Create user with access key and secret key from environment variables
+        echo 'Creating MinIO user with specified access key and secret key...'
+        mc admin user add local ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} || echo 'User already exists'
+        
+        # Add the user to a new group with full access
+        echo 'Creating readwrite policy for the user...'
+        mc admin policy create local readwrite-policy /policies/readwrite-policy.json
+        
+        # Assign the policy to the user
+        echo 'Assigning policy to user...'
+        mc admin policy attach local readwrite-policy --user=${MINIO_ACCESS_KEY}
+        echo 'MinIO user setup complete.'
         
         # create your buckets if they don't already exist
         mc mb local/documents   || true;
