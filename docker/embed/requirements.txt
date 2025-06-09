@@ -10,3 +10,6 @@ requests==2.32.3
 flask==3.1.1
 faiss-cpu==1.11.0
 qdrant-client==1.14.2
+langchain==0.3.25
+langchain-text-splitters==0.3.8
+scikit-learn==1.7.0

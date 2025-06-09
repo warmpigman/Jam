@@ -71,6 +71,9 @@ app.post('/webhook/minio', verifyWebhookToken, async (req, res) => {
         const objectKey = s3?.object?.key;
         
         console.log(`🗑️ File deleted: ${objectKey} from bucket ${bucketName}`);
+        
+        // Delete the file's embeddings from Qdrant
+        await deleteFileEmbeddings(objectKey);
       }
     }
     
@@ -219,6 +222,41 @@ async function processUploadedFile(bucketName: string, objectKey: string) {
     
   } catch (error) {
     console.error(`❌ Error processing file ${objectKey}:`, error);
+  }
+}
+
+// Function to delete file embeddings from Qdrant
+async function deleteFileEmbeddings(filename: string) {
+  try {
+    console.log(`🗑️ Deleting embeddings for file: ${filename}`);
+    
+    const embedServiceUrl = process.env.EMBED_SERVICE_URL || 'http://embed-service:8080';
+    
+    // Use the new document deletion endpoint that handles chunked documents
+    const deleteResponse = await fetch(`${embedServiceUrl}/delete_document/${encodeURIComponent(filename)}`, {
+      method: 'DELETE'
+    });
+    
+    if (deleteResponse.ok) {
+      const result = await deleteResponse.json();
+      console.log(`✅ Successfully deleted embeddings for ${filename}:`, {
+        message: result.message,
+        deleted_count: result.deleted_count
+      });
+      return result;
+    } else {
+      // If no embeddings found or other error
+      const errorData = await deleteResponse.json();
+      if (deleteResponse.status === 404) {
+        console.log(`⚠️ No embeddings found for file: ${filename}`);
+      } else {
+        console.error(`❌ Error from embed service: ${errorData.error || deleteResponse.statusText}`);
+      }
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Error deleting embeddings for file ${filename}:`, error);
+    return null;
   }
 }
 

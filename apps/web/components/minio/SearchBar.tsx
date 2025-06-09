@@ -57,9 +57,10 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
   const [recentSearches, setRecentSearches] = useState<string[]>([])
   const [isSemanticSearching, setIsSemanticSearching] = useState(false)
   const [semanticResults, setSemanticResults] = useState<SearchResult[]>([])
-  const [searchMode, setSearchMode] = useState<'filename' | 'semantic'>('filename')
+  const [searchMode, setSearchMode] = useState<'filename' | 'semantic' | 'hybrid'>('filename')
   const [showSemanticResults, setShowSemanticResults] = useState(false)
   const [isFading, setIsFading] = useState(false)
+  const [showHybridToggle, setShowHybridToggle] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const semanticSearchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -83,7 +84,10 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
 
     setIsSemanticSearching(true)
     try {
-      const response = await fetch('/api/search', {
+      // Determine which endpoint to use based on search mode
+      const endpoint = searchMode === 'hybrid' ? '/api/hybrid_search' : '/api/search'
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -147,11 +151,22 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
     } finally {
       setIsSemanticSearching(false)
     }
-  }, [files])
+  }, [files, searchMode])
 
-  // Debounce semantic search
+  // Effect to detect if in semantic mode (for showing hybrid toggle)
   useEffect(() => {
-    if (searchMode === 'semantic' && searchQuery.length >= 3) {
+    if (searchMode === 'semantic') {
+      // Show hybrid toggle with animation
+      setShowHybridToggle(true)
+    } else if (searchMode === 'filename') {
+      // Hide hybrid toggle when returning to normal mode
+      setShowHybridToggle(false)
+    }
+  }, [searchMode])
+
+  // Debounce semantic/hybrid search
+  useEffect(() => {
+    if ((searchMode === 'semantic' || searchMode === 'hybrid') && searchQuery.length >= 3) {
       if (semanticSearchTimeoutRef.current) {
         clearTimeout(semanticSearchTimeoutRef.current)
       }
@@ -190,7 +205,7 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
     onFileSelect(file.name)
 
     const similarity = 'similarity' in file && file.similarity 
-      ? ` (${Math.round(file.similarity * 100)}% match)`
+      ? ` (${file.similarity.toFixed(2)})`
       : ''
 
     toast.success("File Found", {
@@ -206,18 +221,30 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
     
     // Start fade out
     setTimeout(() => {
-      const newMode = searchMode === 'filename' ? 'semantic' : 'filename'
+      // Cycle through modes: filename -> semantic -> hybrid -> filename
+      let newMode: 'filename' | 'semantic' | 'hybrid';
+      
+      if (searchMode === 'filename') {
+        newMode = 'semantic';
+      } else if (searchMode === 'semantic') {
+        newMode = 'filename'; // Back to filename by default
+      } else {
+        newMode = 'filename';
+      }
+      
       setSearchMode(newMode)
       setSemanticResults([])
       setShowSemanticResults(false)
       setSelectedSuggestionIndex(-1)
       // Don't clear search query - preserve it when switching modes
       
-      toast.success(`${newMode === 'semantic' ? 'Semantic' : 'Regular'} Search Enabled`, {
+      toast.success(`${newMode === 'semantic' ? 'Semantic' : newMode === 'hybrid' ? 'Hybrid' : 'Regular'} Search Enabled`, {
         description: newMode === 'semantic'
           ? "AI-powered semantic search is now active"
-          : "Switched back to regular keyword search",
-        icon: newMode === 'semantic' ? <Sparkles className="h-4 w-4" /> : <Search className="h-4 w-4" />,
+          : newMode === 'hybrid'
+            ? "Combined keyword and semantic search activated"
+            : "Switched back to regular keyword search",
+        icon: newMode === 'semantic' || newMode === 'hybrid' ? <Sparkles className="h-4 w-4" /> : <Search className="h-4 w-4" />,
         position: "top-right",
       })
 
@@ -225,6 +252,30 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
       setTimeout(() => {
         setIsFading(false)
         searchInputRef.current?.focus()
+      }, 50)
+    }, 150)
+  }
+  
+  // Toggle to hybrid search mode
+  const toggleHybridMode = () => {
+    setIsFading(true)
+    
+    // Start fade out
+    setTimeout(() => {
+      const newMode = searchMode === 'hybrid' ? 'semantic' : 'hybrid'
+      setSearchMode(newMode)
+      
+      toast.success(`${newMode === 'hybrid' ? 'Hybrid' : 'Semantic'} Search Enabled`, {
+        description: newMode === 'hybrid'
+          ? "Combined keyword and semantic search activated"
+          : "Switched back to AI-powered semantic search",
+        icon: <Sparkles className="h-4 w-4" />,
+        position: "top-right",
+      })
+
+      // End fade out, start fade in
+      setTimeout(() => {
+        setIsFading(false)
       }, 50)
     }, 150)
   }
@@ -301,7 +352,13 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
         <Input
           ref={searchInputRef}
           type="text"
-          placeholder={searchMode === 'semantic' ? "Ask AI to find files..." : "Search files..."}
+          placeholder={
+            searchMode === 'semantic' 
+              ? "Ask AI to find files..." 
+              : searchMode === 'hybrid'
+                ? "Search with AI + keywords..."
+                : "Search files..."
+          }
           value={searchQuery}
           onChange={handleSearchChange}
           onFocus={() => setIsSearchFocused(true)}
@@ -310,14 +367,14 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
           className={cn(
             "pl-12 pr-28 transition-all duration-300 ease-in-out",
             isSearchFocused && "ring-2 ring-primary/20 border-primary/50",
-            searchMode === 'semantic' && "bg-gradient-to-r from-primary/5 to-transparent border-primary/30",
+            (searchMode === 'semantic' || searchMode === 'hybrid') && "bg-gradient-to-r from-primary/5 to-transparent border-primary/30",
             isFading && "opacity-50 scale-[0.98]",
           )}
           style={{
-            backgroundColor: searchMode === 'semantic' ? "oklch(0.274 0.006 286.033)" : "oklch(0.274 0.006 286.033)",
+            backgroundColor: (searchMode === 'semantic' || searchMode === 'hybrid') ? "oklch(0.274 0.006 286.033)" : "oklch(0.274 0.006 286.033)",
             borderColor: isSearchFocused
               ? "oklch(0.92 0.004 286.32)"
-              : searchMode === 'semantic'
+              : (searchMode === 'semantic' || searchMode === 'hybrid')
                 ? "oklch(0.92 0.004 286.32 / 30%)"
                 : "oklch(1 0 0 / 10%)",
             color: "oklch(0.985 0 0)",
@@ -375,7 +432,43 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
           )}
         >
           <Sparkles className="h-3 w-3 animate-pulse" />
-          <span>Semantic search active</span>
+          <span>{searchMode === 'hybrid' ? "Hybrid search active" : "Semantic search active"}</span>
+        </div>
+      )}
+      
+      {/* Hybrid Search Toggle - Appears when AI mode is enabled */}
+      {showHybridToggle && (
+        <div
+          className={cn(
+            "absolute -top-10 right-3 transition-all duration-300 ease-in-out",
+            searchMode === 'hybrid' ? "opacity-100 translate-y-0" : "opacity-100 translate-y-0",
+            isFading && "opacity-50 scale-95",
+          )}
+          style={{ 
+            animationName: 'slideDown',
+            animationDuration: '0.5s',
+            animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+            animationFillMode: 'both',
+          }}
+        >
+          <Button
+            variant={searchMode === 'hybrid' ? "default" : "outline"}
+            size="sm"
+            onClick={toggleHybridMode}
+            className={cn(
+              "h-7 px-3 text-xs font-medium transition-all duration-300 ease-in-out border",
+              searchMode === 'hybrid'
+                ? "bg-primary/80 text-primary-foreground border-primary/50 shadow-md"
+                : "bg-background/80 backdrop-blur-sm text-muted-foreground hover:text-foreground border-primary/30 hover:border-primary/50",
+            )}
+          >
+            <div className="flex items-center gap-1.5">
+              <Search className="h-3 w-3" />
+              <span>+</span>
+              <Sparkles className="h-3 w-3" />
+              <span>{searchMode === 'hybrid' ? "Hybrid ON" : "Try Hybrid"}</span>
+            </div>
+          </Button>
         </div>
       )}
 
@@ -395,11 +488,25 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
           }}
         >
           {/* AI Search Header */}
-          {searchMode === 'semantic' && searchQuery.length > 0 && (
+          {(searchMode === 'semantic' || searchMode === 'hybrid') && searchQuery.length > 0 && (
             <div className="p-3 border-b border-primary/10 bg-gradient-to-r from-primary/5 to-transparent flex-shrink-0">
               <div className="flex items-center gap-2 text-xs">
-                <Sparkles className="h-3 w-3 text-primary animate-pulse" />
-                <span className="text-primary font-medium">AI-Powered Results</span>
+                {searchMode === 'hybrid' ? (
+                  <>
+                    <div className="flex items-center gap-1">
+                      <Search className="h-3 w-3 text-primary" />
+                      <span>+</span>
+                      <Sparkles className="h-3 w-3 text-primary animate-pulse" />
+                    </div>
+                    <span className="text-primary font-medium">Hybrid Search Results</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3 w-3 text-primary animate-pulse" />
+                    <span className="text-primary font-medium">AI-Powered Results</span>
+                  </>
+                )}
+                
                 {isSemanticSearching && (
                   <div className="flex gap-0.5 ml-2">
                     <div className="w-1 h-1 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -476,7 +583,7 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
                               </Badge>
                               {file.similarity && (
                                 <Badge variant="outline" className="text-xs border-primary/30 text-primary">
-                                  {Math.round(file.similarity * 100)}%
+                                  {file.similarity.toFixed(2)}
                                 </Badge>
                               )}
                             </div>
@@ -507,6 +614,100 @@ export function SearchBar({ files, onFileSelect }: SearchBarProps) {
                       <span>AI couldn't find files matching "{searchQuery}"</span>
                       <span className="text-xs text-muted-foreground/70">
                         Try describing what you're looking for differently
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Hybrid Search Results */}
+            {searchMode === 'hybrid' && showSemanticResults && (
+              <div className="p-2">
+                {semanticResults.length > 0 ? (
+                  <>
+                    <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <Search className="h-3 w-3" />
+                        <span>+</span>
+                        <Sparkles className="h-3 w-3" />
+                      </div>
+                      {semanticResults.length} hybrid match{semanticResults.length !== 1 ? "es" : ""} found
+                    </div>
+                    {semanticResults.map((file, index) => (
+                      <button
+                        key={file.vector_id || file.name}
+                        onClick={() => handleSuggestionClick(file)}
+                        className={cn(
+                          "w-full text-left px-3 py-3 rounded transition-all duration-150 group relative",
+                          selectedSuggestionIndex === index
+                            ? "bg-primary/15 border-l-2 border-primary shadow-sm"
+                            : "hover:bg-muted/30",
+                        )}
+                      >
+                        {selectedSuggestionIndex === index && (
+                          <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent rounded" />
+                        )}
+                        <div className="flex items-center gap-3 relative">
+                          <div className="flex-shrink-0 flex items-center gap-1">
+                            {getFileIcon(file.type)}
+                            <div className="flex items-center gap-0.5">
+                              <Search className="h-2 w-2 text-primary/60" />
+                              <Sparkles className="h-2 w-2 text-primary/60" />
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate" style={{ color: "oklch(0.985 0 0)" }}>
+                                {file.name}
+                              </span>
+                              <Badge
+                                variant="secondary"
+                                className="text-xs bg-primary/20 text-primary"
+                              >
+                                {file.type}
+                              </Badge>
+                              {file.similarity && (
+                                <Badge variant="outline" className="text-xs border-primary/30 text-primary">
+                                  {file.similarity.toFixed(2)}
+                                </Badge>
+                              )}
+                            </div>
+                            {file.preview && (
+                              <div className="mt-1 text-xs text-muted-foreground truncate">
+                                {file.preview}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                              <span>{formatFileSize(file.size)}</span>
+                              <span>•</span>
+                              <span>{file.lastModified}</span>
+                              <span>•</span>
+                              <span className="text-primary/70 flex items-center gap-1">
+                                <div className="flex items-center gap-0.5">
+                                  <Search className="h-2 w-2" />
+                                  <span>+</span>
+                                  <Sparkles className="h-2 w-2" />
+                                </div>
+                                Hybrid Match
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <div className="px-3 py-4 text-center text-sm text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <Search className="h-5 w-5 text-primary/50" />
+                        <span>+</span>
+                        <Sparkles className="h-5 w-5 text-primary/50" />
+                      </div>
+                      <span>No hybrid matches found for "{searchQuery}"</span>
+                      <span className="text-xs text-muted-foreground/70">
+                        Try a different search term or switch to another search mode
                       </span>
                     </div>
                   </div>

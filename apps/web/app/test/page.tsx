@@ -31,6 +31,7 @@ const MinioTestPage: React.FC = React.memo(() => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [highlightedFile, setHighlightedFile] = useState<string | null>(null);
 
   // Upload state consolidated into a single object
@@ -147,6 +148,105 @@ const MinioTestPage: React.FC = React.memo(() => {
 
     }
   }, [fetchFiles]);
+
+  const handleDeleteAllFiles = useCallback(async () => {
+    if (files.length === 0) return;
+    
+    // Create a more descriptive confirmation message
+    const fileCount = files.length;
+    const fileWord = fileCount === 1 ? 'file' : 'files';
+    const confirmMessage = `Are you sure you want to delete all ${fileCount} ${fileWord}?\n\nThis action cannot be undone.`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setIsDeletingAll(true);
+    setError(null);
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      // Create a toast for the overall deletion process
+      const deleteToastId = toast.loading(`Deleting all files...`, {
+        description: `0/${files.length} files deleted`,
+        position: "top-right",
+      });
+
+      // Process files in batches to avoid overwhelming the server
+      const batchSize = 5;
+      const totalFiles = files.length;
+      
+      for (let i = 0; i < totalFiles; i += batchSize) {
+        const batch = files.slice(i, i + batchSize);
+        
+        // Create a batch of promises for concurrent deletion
+        const batchPromises = batch.map(file => 
+          fetch(`/api/minio/delete?objectName=${encodeURIComponent(file.name)}`, {
+            method: 'DELETE',
+          }).then(response => {
+            if (response.ok) {
+              successCount++;
+              return true;
+            } else {
+              failCount++;
+              return false;
+            }
+          }).catch(() => {
+            failCount++;
+            return false;
+          })
+        );
+        
+        // Wait for the current batch to complete
+        await Promise.all(batchPromises);
+        
+        // Update the toast with progress
+        toast.loading(`Deleting files...`, {
+          id: deleteToastId,
+          description: `${successCount}/${totalFiles} files deleted`,
+          position: "top-right",
+        });
+      }
+
+      // Show appropriate final toast based on results
+      if (successCount === totalFiles) {
+        toast.success("All Files Deleted", {
+          id: deleteToastId,
+          description: `Successfully deleted ${totalFiles} ${totalFiles !== 1 ? 'files' : 'file'}`,
+          icon: <CheckCircle className="h-4 w-4" />,
+          position: "top-right",
+        });
+      } else if (successCount > 0 && failCount > 0) {
+        toast.warning("Deletion Partially Complete", {
+          id: deleteToastId,
+          description: `${successCount} deleted, ${failCount} failed`,
+          icon: <AlertTriangle className="h-4 w-4" />,
+          position: "top-right",
+        });
+      } else {
+        toast.error("Deletion Failed", {
+          id: deleteToastId,
+          description: "All files failed to delete",
+          icon: <AlertCircle className="h-4 w-4" />,
+          position: "top-right",
+        });
+      }
+
+      fetchFiles();
+    } catch (err: any) {
+      console.error('Delete all error:', err);
+      setError(err.message || 'Failed to delete files');
+      toast.error("Delete Error", {
+        description: err.message || 'Failed to delete files',
+        icon: <AlertCircle className="h-4 w-4" />,
+        position: "top-right",
+      });
+    } finally {
+      setIsDeletingAll(false);
+    }
+  }, [files, fetchFiles]);
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -651,6 +751,8 @@ const MinioTestPage: React.FC = React.memo(() => {
                 files={files}
                 isDeleting={isDeleting}
                 onDeleteFile={handleDeleteFile}
+                onDeleteAllFiles={handleDeleteAllFiles}
+                isDeletingAll={isDeletingAll}
                 highlightedFile={highlightedFile}
               />
             </div>
